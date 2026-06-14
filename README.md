@@ -253,10 +253,33 @@ lib/
             day_shifts_panel.dart
             roster_table.dart   pharmacist × day roster matrix
             shift_editor_dialog.dart
+  utils/   thai_date.dart       Thai date formatting + Buddhist-era years
 firestore.rules                 role-based security rules
+.github/workflows/firebase-hosting-deploy.yml   CI/CD: auto-deploy on push
 ```
 
 The calendar is a custom component (no third-party calendar package): on wide
 screens each day cell shows shift chips inline; below 840 px it switches to a
 compact grid with colored dots plus a day-detail list, so it works well on
 phones.
+
+## Changelog
+
+### 2026-06-15
+
+- **Original schedule tab** — auto-schedule now saves a read-only snapshot of
+  the generated roster to a separate `originalShifts` collection. A new
+  **Original** tab shows that untouched baseline next to the editable
+  **Roster**, so shift exchanges are visible by comparing the two.
+- **Holidays** — new `holidays` collection, admin screen, and the posted
+  B.E. 2569 clinic-closed days as a one-click seed; holidays are marked red on
+  the calendar and roster. Visible to every signed-in user (read-only unless
+  admin), with dates shown in Thai + Buddhist-era years.
+- **Mobile UX** — "My shifts" shows shift codes (not just dots) on phones, and
+  the By day / My shifts pages now scroll as a whole on small screens.
+- **Fixes** — held Firestore streams as state fields to stop the empty-table
+  flash when switching tabs; made the view switcher scroll so the Original tab
+  can't be clipped.
+- **CI/CD** — added a GitHub Actions workflow that builds and deploys to
+  Firebase Hosting on every push to `main` (see
+  [Automatic deploys](#automatic-deploys-cicd)).
