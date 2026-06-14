@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/shift.dart';
+import '../models/shift_type.dart';
 
 /// Lists every shift for the selected day; editors can tap a shift to edit it.
 class DayShiftsPanel extends StatelessWidget {
@@ -9,16 +10,25 @@ class DayShiftsPanel extends StatelessWidget {
     super.key,
     required this.day,
     required this.shifts,
+    required this.typesById,
     required this.canEdit,
     this.onEditShift,
     this.onAddShift,
+    this.shrinkWrap = false,
   });
 
   final DateTime day;
   final List<Shift> shifts;
+  final Map<String, ShiftType> typesById;
   final bool canEdit;
   final ValueChanged<Shift>? onEditShift;
   final VoidCallback? onAddShift;
+
+  /// When true the shift list sizes to its content and does not scroll itself
+  /// (the parent provides the scrolling). Used in the mobile layout where the
+  /// whole page scrolls. When false the list fills the panel and scrolls
+  /// internally (the wide side-panel layout).
+  final bool shrinkWrap;
 
   @override
   Widget build(BuildContext context) {
@@ -33,8 +43,9 @@ class DayShiftsPanel extends StatelessWidget {
               Expanded(
                 child: Text(
                   DateFormat('EEEE, d MMMM yyyy').format(day),
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w600),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               if (canEdit && onAddShift != null)
@@ -51,32 +62,43 @@ class DayShiftsPanel extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             child: Text(
               'No shifts scheduled.',
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           )
         else
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              itemCount: shifts.length,
-              itemBuilder: (context, i) => _ShiftTile(
-                shift: shifts[i],
-                onTap: canEdit && onEditShift != null
-                    ? () => onEditShift!(shifts[i])
-                    : null,
-              ),
-            ),
-          ),
+          _buildList(),
       ],
     );
+  }
+
+  Widget _buildList() {
+    final list = ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      shrinkWrap: shrinkWrap,
+      physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
+      itemCount: shifts.length,
+      itemBuilder: (context, i) => _ShiftTile(
+        shift: shifts[i],
+        type:
+            typesById[shifts[i].typeId] ?? ShiftType.unknown(shifts[i].typeId),
+        onTap: canEdit && onEditShift != null
+            ? () => onEditShift!(shifts[i])
+            : null,
+      ),
+    );
+    // In shrink-wrap mode the parent scroll view bounds the height; otherwise
+    // fill the remaining panel space.
+    return shrinkWrap ? list : Expanded(child: list);
   }
 }
 
 class _ShiftTile extends StatelessWidget {
-  const _ShiftTile({required this.shift, this.onTap});
+  const _ShiftTile({required this.shift, required this.type, this.onTap});
 
   final Shift shift;
+  final ShiftType type;
   final VoidCallback? onTap;
 
   @override
@@ -85,23 +107,23 @@ class _ShiftTile extends StatelessWidget {
     return Card(
       elevation: 0,
       margin: const EdgeInsets.symmetric(vertical: 3),
-      color: shift.type.color.withValues(alpha: 0.10),
+      color: type.color.withValues(alpha: 0.10),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: shift.type.color.withValues(alpha: 0.4)),
+        side: BorderSide(color: type.color.withValues(alpha: 0.4)),
       ),
       child: ListTile(
         dense: true,
         onTap: onTap,
         leading: CircleAvatar(
           radius: 16,
-          backgroundColor: shift.type.color,
+          backgroundColor: type.color,
           child: Text(
-            shift.pharmacist.isEmpty
-                ? '?'
-                : shift.pharmacist.characters.first.toUpperCase(),
+            type.label,
             style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold),
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
         title: Text(
@@ -109,11 +131,14 @@ class _ShiftTile extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         subtitle: Text(
-          '${shift.type.label} · ${shift.start}–${shift.end}'
+          '${type.description.isEmpty ? type.label : '${type.label} ${type.description}'}'
+          ' · ${shift.start}–${shift.end}'
           '${shift.note.isEmpty ? '' : '\n${shift.note}'}',
           style: theme.textTheme.bodySmall,
         ),
-        trailing: onTap == null ? null : const Icon(Icons.edit_outlined, size: 18),
+        trailing: onTap == null
+            ? null
+            : const Icon(Icons.edit_outlined, size: 18),
       ),
     );
   }

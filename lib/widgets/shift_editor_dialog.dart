@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../models/pharmacist.dart';
 import '../models/shift.dart';
+import '../models/shift_type.dart';
 
 /// Result of the editor: either a shift to save, or a request to delete.
 class ShiftEditorResult {
@@ -13,9 +15,13 @@ class ShiftEditorResult {
 }
 
 /// Opens the create/edit dialog. Returns null if cancelled.
+/// [types] and [pharmacists] are the current config and must not be empty.
 Future<ShiftEditorResult?> showShiftEditor(
   BuildContext context, {
   required DateTime day,
+  required List<ShiftType> types,
+  required List<Pharmacist> pharmacists,
+  String? presetPharmacistId,
   Shift? existing,
   required String currentUid,
 }) {
@@ -23,6 +29,9 @@ Future<ShiftEditorResult?> showShiftEditor(
     context: context,
     builder: (_) => _ShiftEditorDialog(
       day: day,
+      types: types,
+      pharmacists: pharmacists,
+      presetPharmacistId: presetPharmacistId,
       existing: existing,
       currentUid: currentUid,
     ),
@@ -32,11 +41,17 @@ Future<ShiftEditorResult?> showShiftEditor(
 class _ShiftEditorDialog extends StatefulWidget {
   const _ShiftEditorDialog({
     required this.day,
+    required this.types,
+    required this.pharmacists,
     required this.currentUid,
+    this.presetPharmacistId,
     this.existing,
   });
 
   final DateTime day;
+  final List<ShiftType> types;
+  final List<Pharmacist> pharmacists;
+  final String? presetPharmacistId;
   final String currentUid;
   final Shift? existing;
 
@@ -46,12 +61,40 @@ class _ShiftEditorDialog extends StatefulWidget {
 
 class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
   final _formKey = GlobalKey<FormState>();
+
+  /// Editing a shift whose type was deleted keeps it selectable so the
+  /// other fields can still be changed without re-typing the shift.
+  late final List<ShiftType> _types = [
+    ...widget.types,
+    if (widget.existing != null &&
+        !widget.types.any((t) => t.id == widget.existing!.typeId))
+      ShiftType.unknown(widget.existing!.typeId),
+  ];
+
+  /// Same trick for the pharmacist: a shift whose pharmacist was removed
+  /// from the config (or a legacy free-text shift) stays selectable under
+  /// its saved name.
+  late final List<Pharmacist> _pharmacists = [
+    ...widget.pharmacists,
+    if (widget.existing != null &&
+        !widget.pharmacists.any((p) => p.id == widget.existing!.pharmacistId))
+      Pharmacist(
+        id: widget.existing!.pharmacistId,
+        name: widget.existing!.pharmacist.isEmpty
+            ? '(unknown)'
+            : widget.existing!.pharmacist,
+      ),
+  ];
+
   late DateTime _day = widget.existing?.date ?? widget.day;
-  late ShiftType _type = widget.existing?.type ?? ShiftType.morning;
-  late String _start = widget.existing?.start ?? _type.defaultStart;
-  late String _end = widget.existing?.end ?? _type.defaultEnd;
-  late final _pharmacistCtrl =
-      TextEditingController(text: widget.existing?.pharmacist ?? '');
+  late String _typeId = widget.existing?.typeId ?? _types.first.id;
+  late String _start = widget.existing?.start ?? _types.first.start;
+  late String _end = widget.existing?.end ?? _types.first.end;
+  late String _pharmacistId = widget.existing?.pharmacistId ??
+      (widget.pharmacists
+              .any((p) => p.id == widget.presetPharmacistId)
+          ? widget.presetPharmacistId!
+          : _pharmacists.first.id);
   late final _noteCtrl =
       TextEditingController(text: widget.existing?.note ?? '');
 
@@ -59,7 +102,6 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
 
   @override
   void dispose() {
-    _pharmacistCtrl.dispose();
     _noteCtrl.dispose();
     super.dispose();
   }
@@ -92,15 +134,18 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
+    final pharmacist =
+        _pharmacists.firstWhere((p) => p.id == _pharmacistId);
     Navigator.pop(
       context,
       ShiftEditorResult.save(Shift(
         id: widget.existing?.id ?? '',
         dateKey: Shift.keyFor(_day),
-        type: _type,
+        typeId: _typeId,
         start: _start,
         end: _end,
-        pharmacist: _pharmacistCtrl.text.trim(),
+        pharmacist: pharmacist.fullName,
+        pharmacistId: pharmacist.id,
         note: _noteCtrl.text.trim(),
         createdBy: widget.existing?.createdBy ?? widget.currentUid,
       )),
@@ -108,12 +153,16 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
   }
 
   Future<void> _confirmDelete() async {
+    final typeLabel = _types
+        .firstWhere((t) => t.id == widget.existing!.typeId,
+            orElse: () => ShiftType.unknown(widget.existing!.typeId))
+        .label;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete shift?'),
         content: Text(
-            'Remove ${widget.existing!.pharmacist}\'s ${widget.existing!.type.label.toLowerCase()} shift?'),
+            'Remove ${widget.existing!.pharmacist}\'s "$typeLabel" shift?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -146,14 +195,14 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
                 onPressed: _pickDate,
               ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<ShiftType>(
-                initialValue: _type,
+              DropdownButtonFormField<String>(
+                initialValue: _typeId,
                 decoration: const InputDecoration(
                     labelText: 'Shift type', border: OutlineInputBorder()),
                 items: [
-                  for (final type in ShiftType.values)
+                  for (final type in _types)
                     DropdownMenuItem(
-                      value: type,
+                      value: type.id,
                       child: Row(children: [
                         Container(
                           width: 12,
@@ -162,16 +211,24 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
                           decoration: BoxDecoration(
                               color: type.color, shape: BoxShape.circle),
                         ),
-                        Text(type.label),
+                        Text([
+                          type.label,
+                          if (type.description.isNotEmpty) type.description,
+                          if (type.start.isNotEmpty)
+                            '(${type.start}–${type.end})',
+                        ].join(' ')),
                       ]),
                     ),
                 ],
-                onChanged: (type) {
-                  if (type == null) return;
+                onChanged: (typeId) {
+                  if (typeId == null) return;
+                  final type = _types.firstWhere((t) => t.id == typeId);
                   setState(() {
-                    _type = type;
-                    _start = type.defaultStart;
-                    _end = type.defaultEnd;
+                    _typeId = typeId;
+                    if (type.start.isNotEmpty) {
+                      _start = type.start;
+                      _end = type.end;
+                    }
                   });
                 },
               ),
@@ -196,16 +253,21 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
                 ),
               ]),
               const SizedBox(height: 12),
-              TextFormField(
-                controller: _pharmacistCtrl,
+              DropdownButtonFormField<String>(
+                initialValue: _pharmacistId,
                 decoration: const InputDecoration(
-                  labelText: 'Pharmacist name',
-                  border: OutlineInputBorder(),
-                ),
-                textInputAction: TextInputAction.next,
-                validator: (v) => (v == null || v.trim().isEmpty)
-                    ? 'Enter the pharmacist\'s name'
-                    : null,
+                    labelText: 'Pharmacist', border: OutlineInputBorder()),
+                items: [
+                  for (final pharmacist in _pharmacists)
+                    DropdownMenuItem(
+                      value: pharmacist.id,
+                      child: Text(pharmacist.displayName,
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (id) {
+                  if (id != null) setState(() => _pharmacistId = id);
+                },
               ),
               const SizedBox(height: 12),
               TextFormField(

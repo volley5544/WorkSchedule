@@ -40,6 +40,10 @@ class ManageUsersScreen extends StatelessWidget {
                   foregroundImage: user.photoUrl == null
                       ? null
                       : NetworkImage(user.photoUrl!),
+                  // Fall back to the initial when the photo fails to load
+                  // (e.g. rate-limited by Google's CDN).
+                  onForegroundImageError:
+                      user.photoUrl == null ? null : (_, _) {},
                   child: Text(user.displayName.isEmpty
                       ? '?'
                       : user.displayName.characters.first.toUpperCase()),

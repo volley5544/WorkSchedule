@@ -37,6 +37,17 @@ class AppUser {
   final UserRole role;
   final String? photoUrl;
 
+  /// Stand-in for visitors browsing without an account: view-only, no
+  /// profile document. Identified by the empty uid.
+  static const guest = AppUser(
+    uid: '',
+    email: '',
+    displayName: 'Guest',
+    role: UserRole.viewer,
+  );
+
+  bool get isGuest => uid.isEmpty;
+
   factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? {};
     return AppUser(

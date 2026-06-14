@@ -31,10 +31,47 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Shifts: readable by all signed-in users, writable by editors/admins.
+    // The schedule itself is public so visitors can view the roster without
+    // an account (the app offers a view-only guest mode). Writes still
+    // require the editor/admin role.
+
+    // Shifts: writable by editors/admins.
     match /shifts/{shiftId} {
-      allow read: if signedIn();
+      allow read: if true;
       allow create, update, delete: if canEdit();
+    }
+
+    // Read-only baseline snapshot of the auto-generated roster. Written only
+    // by the auto-scheduler (editors/admins); kept separate from `shifts` so
+    // the original survives shift swaps. Public read like the live roster.
+    match /originalShifts/{shiftId} {
+      allow read: if true;
+      allow create, update, delete: if canEdit();
+    }
+
+    // Shift type config (code, hours, color): managed only by admins.
+    match /shiftTypes/{typeId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Pharmacist roster list: managed only by admins.
+    match /pharmacists/{pharmacistId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Clinic holidays (closed days): shown on the public calendar, managed
+    // only by admins.
+    match /holidays/{holidayId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Misc app config (e.g. the name-title list): managed only by admins.
+    match /config/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
     }
   }
 }

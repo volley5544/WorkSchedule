@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:work_schedule/models/shift.dart';
+import 'package:work_schedule/models/shift_type.dart';
 import 'package:work_schedule/widgets/month_calendar.dart';
 
 void main() {
@@ -9,12 +10,20 @@ void main() {
       );
 
   final june2026 = DateTime(2026, 6);
+  const morning = ShiftType(
+    id: 'morning',
+    label: 'ช',
+    start: '08:30',
+    end: '16:30',
+    color: Color(0xFFF59E0B),
+  );
+  const typesById = {'morning': morning};
   const shift = Shift(
     id: 's1',
     dateKey: '2026-06-15',
-    type: ShiftType.morning,
-    start: '08:00',
-    end: '16:00',
+    typeId: 'morning',
+    start: '08:30',
+    end: '16:30',
     pharmacist: 'Alice',
   );
 
@@ -23,6 +32,7 @@ void main() {
       month: june2026,
       selectedDay: DateTime(2026, 6, 1),
       shiftsByDay: const {},
+      typesById: typesById,
       onSelectDay: (_) {},
     )));
     expect(find.text('1'), findsOneWidget);
@@ -38,9 +48,24 @@ void main() {
       shiftsByDay: const {
         '2026-06-15': [shift]
       },
+      typesById: typesById,
       onSelectDay: (_) {},
     )));
-    expect(find.text('08:00 Alice'), findsOneWidget);
+    expect(find.text('ช Alice'), findsOneWidget);
+  });
+
+  testWidgets('shift with a deleted type still renders, as unknown',
+      (tester) async {
+    await tester.pumpWidget(wrap(MonthCalendar(
+      month: june2026,
+      selectedDay: DateTime(2026, 6, 15),
+      shiftsByDay: const {
+        '2026-06-15': [shift]
+      },
+      typesById: const {},
+      onSelectDay: (_) {},
+    )));
+    expect(find.text('morning Alice'), findsOneWidget);
   });
 
   testWidgets('tapping a day reports the selection', (tester) async {
@@ -49,6 +74,7 @@ void main() {
       month: june2026,
       selectedDay: DateTime(2026, 6, 1),
       shiftsByDay: const {},
+      typesById: typesById,
       onSelectDay: (d) => selected = d,
     )));
     await tester.tap(find.text('20'));

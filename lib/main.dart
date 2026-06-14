@@ -61,6 +61,9 @@ class _AuthGate extends StatefulWidget {
 class _AuthGateState extends State<_AuthGate> {
   final _auth = AuthService();
 
+  /// Browsing without an account (view-only By day / Roster).
+  bool _guest = false;
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
@@ -70,10 +73,28 @@ class _AuthGateState extends State<_AuthGate> {
           return const _LoadingScreen();
         }
         final user = authSnap.data;
-        if (user == null) return LoginScreen(auth: _auth);
+        if (user == null) {
+          if (_guest) {
+            return HomeScreen(
+              user: AppUser.guest,
+              auth: _auth,
+              onSignIn: () => setState(() => _guest = false),
+            );
+          }
+          return LoginScreen(
+            auth: _auth,
+            onContinueAsGuest: () => setState(() => _guest = true),
+          );
+        }
         return StreamBuilder<AppUser?>(
           stream: _auth.userProfile(user.uid),
           builder: (context, profileSnap) {
+            if (profileSnap.hasError) {
+              return _ProfileErrorScreen(
+                error: profileSnap.error.toString(),
+                onSignOut: _auth.signOut,
+              );
+            }
             final profile = profileSnap.data;
             // Profile doc may lag a moment behind first sign-in while
             // _ensureUserDoc creates it.
@@ -92,6 +113,60 @@ class _LoadingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(body: Center(child: CircularProgressIndicator()));
+  }
+}
+
+class _ProfileErrorScreen extends StatelessWidget {
+  const _ProfileErrorScreen({required this.error, required this.onSignOut});
+
+  final String error;
+  final Future<void> Function() onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      body: Center(
+        child: Card(
+          margin: const EdgeInsets.all(24),
+          child: Container(
+            width: 560,
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Icon(Icons.error_outline,
+                      color: theme.colorScheme.error, size: 32),
+                  const SizedBox(width: 12),
+                  Text('Could not load your profile',
+                      style: theme.textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.bold)),
+                ]),
+                const SizedBox(height: 16),
+                const Text(
+                  'Sign-in succeeded, but reading your profile from Cloud '
+                  'Firestore failed. This usually means the security rules in '
+                  'firestore.rules have not been deployed, or the Firestore '
+                  'database has not been created yet.',
+                ),
+                const SizedBox(height: 16),
+                SelectableText('Details: $error',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.error)),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: onSignOut,
+                  icon: const Icon(Icons.logout),
+                  label: const Text('Sign out'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -1,0 +1,58 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|wasm|css|woff2|otf|ttf|png|jpg|svg)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          }
+        ]
+      },
+      {
+        "source": "/@(index.html|flutter_service_worker.js|version.json|manifest.json)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ]
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "pharmacist-schedule",
+          "appId": "1:229070646467:android:8eb749eaba8dbabe20c676",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "pharmacist-schedule",
+          "configurations": {
+            "android": "1:229070646467:android:8eb749eaba8dbabe20c676",
+            "ios": "1:229070646467:ios:8873c8c170e5eb7920c676",
+            "macos": "1:229070646467:ios:8873c8c170e5eb7920c676",
+            "web": "1:229070646467:web:9ca89b74b4d5e1b120c676",
+            "windows": "1:229070646467:web:33aa70e1ae17b19c20c676"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,52 +1,14 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
-
-/// Standard hospital pharmacy shift types with default working hours.
-enum ShiftType { morning, evening, night, onCall }
-
-extension ShiftTypeX on ShiftType {
-  String get label => switch (this) {
-        ShiftType.morning => 'Morning',
-        ShiftType.evening => 'Evening',
-        ShiftType.night => 'Night',
-        ShiftType.onCall => 'On-call',
-      };
-
-  String get defaultStart => switch (this) {
-        ShiftType.morning => '08:00',
-        ShiftType.evening => '16:00',
-        ShiftType.night => '00:00',
-        ShiftType.onCall => '08:00',
-      };
-
-  String get defaultEnd => switch (this) {
-        ShiftType.morning => '16:00',
-        ShiftType.evening => '00:00',
-        ShiftType.night => '08:00',
-        ShiftType.onCall => '08:00',
-      };
-
-  Color get color => switch (this) {
-        ShiftType.morning => const Color(0xFFF59E0B),
-        ShiftType.evening => const Color(0xFF3B82F6),
-        ShiftType.night => const Color(0xFF8B5CF6),
-        ShiftType.onCall => const Color(0xFF14B8A6),
-      };
-
-  static ShiftType fromString(String? value) => ShiftType.values.firstWhere(
-        (t) => t.name == value,
-        orElse: () => ShiftType.morning,
-      );
-}
 
 class Shift {
   const Shift({
     required this.id,
     required this.dateKey,
-    required this.type,
+    required this.typeId,
     required this.start,
     required this.end,
     required this.pharmacist,
+    this.pharmacistId = '',
     this.note = '',
     this.createdBy,
   });
@@ -55,12 +17,23 @@ class Shift {
 
   /// Day of the shift as `yyyy-MM-dd` (string keys sort & range-query cleanly).
   final String dateKey;
-  final ShiftType type;
+
+  /// Document id of the shift type in the `shiftTypes` collection. Resolved
+  /// against the live config when rendering; deleted types fall back to
+  /// [ShiftType.unknown].
+  final String typeId;
 
   /// Times as `HH:mm`.
   final String start;
   final String end;
+
+  /// Pharmacist display name, denormalized at save time so shifts stay
+  /// readable even if the pharmacist is later removed from the config.
   final String pharmacist;
+
+  /// Document id in the `pharmacists` collection ('' on legacy shifts
+  /// created before the pharmacist config existed).
+  final String pharmacistId;
   final String note;
   final String? createdBy;
 
@@ -74,10 +47,11 @@ class Shift {
     return Shift(
       id: doc.id,
       dateKey: data['dateKey'] as String? ?? '',
-      type: ShiftTypeX.fromString(data['type'] as String?),
+      typeId: data['type'] as String? ?? '',
       start: data['start'] as String? ?? '',
       end: data['end'] as String? ?? '',
       pharmacist: data['pharmacist'] as String? ?? '',
+      pharmacistId: data['pharmacistId'] as String? ?? '',
       note: data['note'] as String? ?? '',
       createdBy: data['createdBy'] as String?,
     );
@@ -85,10 +59,11 @@ class Shift {
 
   Map<String, dynamic> toMap() => {
         'dateKey': dateKey,
-        'type': type.name,
+        'type': typeId,
         'start': start,
         'end': end,
         'pharmacist': pharmacist,
+        'pharmacistId': pharmacistId,
         'note': note,
         'createdBy': createdBy,
         'updatedAt': FieldValue.serverTimestamp(),

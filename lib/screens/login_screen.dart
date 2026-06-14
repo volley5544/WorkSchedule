@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, required this.auth});
+  const LoginScreen({super.key, required this.auth, this.onContinueAsGuest});
 
   final AuthService auth;
+
+  /// Lets visitors browse the schedule view-only without an account.
+  final VoidCallback? onContinueAsGuest;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -24,9 +27,9 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await widget.auth.signInWithGoogle();
     } on FirebaseAuthException catch (e) {
-      setState(() => _error = e.message ?? 'Sign-in failed.');
+      if (mounted) setState(() => _error = e.message ?? 'Sign-in failed.');
     } catch (e) {
-      setState(() => _error = 'Sign-in failed: $e');
+      if (mounted) setState(() => _error = 'Sign-in failed: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -79,6 +82,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     minimumSize: const Size.fromHeight(48),
                   ),
                 ),
+                if (widget.onContinueAsGuest != null) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : widget.onContinueAsGuest,
+                    icon: const Icon(Icons.visibility_outlined),
+                    label: const Text('Continue without signing in'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                  ),
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: 16),
                   Text(
