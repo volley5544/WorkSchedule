@@ -203,6 +203,33 @@ provide fast repeat loads, so the service worker isn't needed.
 
 Live at <https://pharmacist-schedule.web.app>.
 
+### Automatic deploys (CI/CD)
+
+`.github/workflows/firebase-hosting-deploy.yml` runs on every push to `main`
+(and on demand from the Actions tab). It pins Flutter to the project version,
+runs `flutter analyze` + `flutter test` as gates, builds the web app with
+`--pwa-strategy=none`, and deploys to the live Hosting channel — so a push is
+all it takes to ship.
+
+One-time setup — add a Firebase service-account key as a repo secret named
+**`FIREBASE_SERVICE_ACCOUNT`**:
+
+1. Firebase Console → ⚙ **Project settings → Service accounts →
+   Generate new private key** → download the JSON.
+2. GitHub repo → **Settings → Secrets and variables → Actions →
+   New repository secret**, name `FIREBASE_SERVICE_ACCOUNT`, paste the whole
+   JSON file contents as the value.
+
+   Or with the GitHub CLI:
+
+   ```sh
+   gh secret set FIREBASE_SERVICE_ACCOUNT < path/to/service-account.json
+   ```
+
+Until that secret exists the build/test steps still run, but the deploy step
+fails. Firestore **rules** are not deployed by CI (only Hosting) — keep using
+`firebase deploy --only firestore:rules` for rule changes.
+
 ## Project structure
 
 ```
