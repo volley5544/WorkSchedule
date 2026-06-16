@@ -1,7 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../l10n/app_text.dart';
 import '../services/auth_service.dart';
+import '../widgets/settings_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.auth, this.onContinueAsGuest});
@@ -27,7 +29,9 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await widget.auth.signInWithGoogle();
     } on FirebaseAuthException catch (e) {
-      if (mounted) setState(() => _error = e.message ?? 'Sign-in failed.');
+      if (mounted) {
+        setState(() => _error = e.message ?? AppText.of(context).signInFailed);
+      }
     } catch (e) {
       if (mounted) setState(() => _error = 'Sign-in failed: $e');
     } finally {
@@ -38,7 +42,20 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final t = AppText.of(context);
     return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        actions: [
+          IconButton(
+            tooltip: t.settingsTitle,
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => showSettingsDialog(context),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      extendBodyBehindAppBar: true,
       body: Center(
         child: Card(
           margin: const EdgeInsets.all(24),
@@ -51,7 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 Icon(Icons.local_pharmacy, size: 64, color: scheme.primary),
                 const SizedBox(height: 16),
                 Text(
-                  'Pharmacy Work Schedule',
+                  t.appTitle,
                   textAlign: TextAlign.center,
                   style: Theme.of(context)
                       .textTheme
@@ -60,7 +77,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Shift roster for hospital pharmacists.\nSign in with your Google account to continue.',
+                  t.loginSubtitle,
                   textAlign: TextAlign.center,
                   style: Theme.of(context)
                       .textTheme
@@ -77,7 +94,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.login),
-                  label: Text(_busy ? 'Signing in…' : 'Sign in with Google'),
+                  label: Text(_busy ? t.signingIn : t.signInWithGoogle),
                   style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(48),
                   ),
@@ -87,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   OutlinedButton.icon(
                     onPressed: _busy ? null : widget.onContinueAsGuest,
                     icon: const Icon(Icons.visibility_outlined),
-                    label: const Text('Continue without signing in'),
+                    label: Text(t.continueWithoutSignIn),
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size.fromHeight(48),
                     ),
@@ -103,7 +120,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
                 const SizedBox(height: 16),
                 Text(
-                  'New accounts start as Viewer. Ask an admin to grant Editor access.',
+                  t.newAccountNote,
                   textAlign: TextAlign.center,
                   style: Theme.of(context)
                       .textTheme

@@ -5,6 +5,7 @@ import '../models/holiday.dart';
 import '../models/pharmacist.dart';
 import '../models/shift.dart';
 import '../models/shift_type.dart';
+import 'schedule_planner.dart';
 
 class ScheduleService {
   final _db = FirebaseFirestore.instance;
@@ -35,6 +36,17 @@ class ScheduleService {
   }
 
   Future<void> deleteShiftType(String id) => _shiftTypes.doc(id).delete();
+
+  /// Persists a new ordering of shift types by writing each id's position in
+  /// [orderedIds] to its `sortOrder`. This order is what the auto-scheduler
+  /// uses to decide which shift type is assigned first each day.
+  Future<void> reorderShiftTypes(List<String> orderedIds) {
+    final batch = _db.batch();
+    for (var i = 0; i < orderedIds.length; i++) {
+      batch.update(_shiftTypes.doc(orderedIds[i]), {'sortOrder': i});
+    }
+    return batch.commit();
+  }
 
   /// Standard Thai name titles, used until an admin saves a custom list.
   static const defaultNameTitles = ['นาย', 'นางสาว', 'นาง', 'คุณ'];
@@ -69,6 +81,22 @@ class ScheduleService {
   }
 
   Future<void> deletePharmacist(String id) => _pharmacists.doc(id).delete();
+
+  /// Persists a new pharmacist order by writing each id's position in
+  /// [orderedIds] (1-based) to either `showOrder` (the UI/table display order)
+  /// when [byDisplay] is true, or `queue` (the scheduling rotation order)
+  /// otherwise.
+  Future<void> reorderPharmacists(
+    List<String> orderedIds, {
+    bool byDisplay = false,
+  }) {
+    final field = byDisplay ? 'showOrder' : 'queue';
+    final batch = _db.batch();
+    for (var i = 0; i < orderedIds.length; i++) {
+      batch.update(_pharmacists.doc(orderedIds[i]), {field: i + 1});
+    }
+    return batch.commit();
+  }
 
   CollectionReference<Map<String, dynamic>> get _holidays =>
       _db.collection('holidays');
@@ -135,7 +163,7 @@ class ScheduleService {
             byDay.putIfAbsent(shift.dateKey, () => []).add(shift);
           }
           for (final list in byDay.values) {
-            list.sort((a, b) => a.start.compareTo(b.start));
+            list.sort(Shift.byStartTime);
           }
           return byDay;
         });
@@ -150,11 +178,16 @@ class ScheduleService {
 
   /// Auto-fills the roster for [months] months starting at [startMonth].
   ///
-  /// Walks every day in the range and, for each shift type active on that
-  /// weekday (in sortOrder), assigns the next pharmacist in queue order,
-  /// looping 1 → 2 → … → n → 1. The rotation continues from the last
-  /// scheduled shift of the month *before* [startMonth] (e.g. if 30 June
-  /// ended on pharmacist 5, 1 July starts with pharmacist 6).
+  /// The scheduling rules live in the pure [planSchedule] planner; this method
+  /// only does the Firestore I/O around it: it loads the previous month's
+  /// *Original* baseline (to continue each rotation, ignoring swaps), loads
+  /// what's already in the live roster range, runs the planner, and writes the
+  /// result.
+  ///
+  /// Each shift type rotates **independently**, with its own counter per day
+  /// bucket (weekday / weekend / holiday). [holidayKeys] are the `yyyy-MM-dd`
+  /// keys of clinic holidays; a holiday is treated as a non-working day, so
+  /// only types flagged [ShiftType.onHoliday] are scheduled then.
   ///
   /// With [replaceExisting] the selected months are wiped first and fully
   /// regenerated; otherwise days that already have a shift of a given type
@@ -166,21 +199,27 @@ class ScheduleService {
     required List<ShiftType> types,
     required List<Pharmacist> pharmacists,
     required String createdBy,
+    Set<String> holidayKeys = const {},
     bool replaceExisting = false,
   }) async {
     if (types.isEmpty || pharmacists.isEmpty || months < 1) return 0;
     final first = DateTime(startMonth.year, startMonth.month, 1);
     final last = DateTime(startMonth.year, startMonth.month + months, 0);
 
-    final sortedTypes = [...types]
-      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
-    final typeOrder = {
-      for (var i = 0; i < sortedTypes.length; i++) sortedTypes[i].id: i,
-    };
+    PlannedShift toPlanned(Shift s) => PlannedShift(
+          dateKey: s.dateKey,
+          typeId: s.typeId,
+          pharmacistId: s.pharmacistId,
+          start: s.start,
+          end: s.end,
+        );
 
-    // Continue the rotation from the previous month's last scheduled shift.
-    var index = 0;
-    final prevSnap = await _shifts
+    // The previous month seeds each (type × bucket) rotation counter. This
+    // reads the read-only Original baseline (not the live roster), so one-off
+    // shift swaps in a previous month don't permanently drift the rotation —
+    // continuation follows the clean auto-generated order. Falls back to an
+    // empty tail (rotation starts fresh) when that month was never generated.
+    final prevSnap = await _originalShifts
         .where(
           'dateKey',
           isGreaterThanOrEqualTo: Shift.keyFor(
@@ -194,33 +233,18 @@ class ScheduleService {
           ),
         )
         .get();
-    final prevShifts =
-        prevSnap.docs
-            .map(Shift.fromDoc)
-            .where((s) => s.pharmacistId.isNotEmpty)
-            .toList()
-          ..sort((a, b) {
-            final byDay = a.dateKey.compareTo(b.dateKey);
-            if (byDay != 0) return byDay;
-            final byType = (typeOrder[a.typeId] ?? 0).compareTo(
-              typeOrder[b.typeId] ?? 0,
-            );
-            if (byType != 0) return byType;
-            return a.start.compareTo(b.start);
-          });
-    if (prevShifts.isNotEmpty) {
-      final lastIndex = pharmacists.indexWhere(
-        (p) => p.id == prevShifts.last.pharmacistId,
-      );
-      if (lastIndex != -1) index = (lastIndex + 1) % pharmacists.length;
-    }
+    final priorTail = prevSnap.docs
+        .map(Shift.fromDoc)
+        .where((s) => s.pharmacistId.isNotEmpty)
+        .map(toPlanned)
+        .toList();
 
     final existingSnap = await _shifts
         .where('dateKey', isGreaterThanOrEqualTo: Shift.keyFor(first))
         .where('dateKey', isLessThanOrEqualTo: Shift.keyFor(last))
         .get();
+    final existing = existingSnap.docs.map(Shift.fromDoc).toList();
 
-    var created = 0;
     var batch = _db.batch();
     var ops = 0;
     Future<void> flushIfFull() async {
@@ -230,9 +254,10 @@ class ScheduleService {
       ops = 0;
     }
 
-    // Either wipe the range for a clean regeneration, or note what is
-    // already scheduled so it stays as-is.
-    final taken = <String>{};
+    // Either wipe the range for a clean regeneration, or keep what's already
+    // scheduled (those slots are skipped and don't advance any rotation).
+    final keepSlots = <String>{};
+    final keptShifts = <PlannedShift>[];
     if (replaceExisting) {
       for (final doc in existingSnap.docs) {
         batch.delete(doc.reference);
@@ -240,42 +265,41 @@ class ScheduleService {
         await flushIfFull();
       }
     } else {
-      taken.addAll(
-        existingSnap.docs
-            .map(Shift.fromDoc)
-            .map((shift) => '${shift.dateKey}|${shift.typeId}'),
-      );
+      for (final shift in existing) {
+        keepSlots.add('${shift.dateKey}|${shift.typeId}');
+        if (shift.pharmacistId.isNotEmpty) keptShifts.add(toPlanned(shift));
+      }
     }
+
+    final byId = {for (final p in pharmacists) p.id: p};
+    final plan = planSchedule(
+      first: first,
+      last: last,
+      types: types,
+      queue: pharmacists,
+      holidayKeys: holidayKeys,
+      keepSlots: keepSlots,
+      keptShifts: keptShifts,
+      priorTail: priorTail,
+    );
 
     // Each shift created this run, mirrored into the original baseline below.
     final generated = <Shift>[];
-    for (
-      var day = first;
-      !day.isAfter(last);
-      day = DateTime(day.year, day.month, day.day + 1)
-    ) {
-      final dateKey = Shift.keyFor(day);
-      for (final type in sortedTypes) {
-        if (!type.days.contains(day.weekday)) continue;
-        if (taken.contains('$dateKey|${type.id}')) continue;
-        final pharmacist = pharmacists[index];
-        index = (index + 1) % pharmacists.length;
-        final shift = Shift(
-          id: '',
-          dateKey: dateKey,
-          typeId: type.id,
-          start: type.start,
-          end: type.end,
-          pharmacist: pharmacist.fullName,
-          pharmacistId: pharmacist.id,
-          createdBy: createdBy,
-        );
-        batch.set(_shifts.doc(), shift.toMap());
-        generated.add(shift);
-        created++;
-        ops++;
-        await flushIfFull();
-      }
+    for (final p in plan) {
+      final shift = Shift(
+        id: '',
+        dateKey: p.dateKey,
+        typeId: p.typeId,
+        start: p.start,
+        end: p.end,
+        pharmacist: byId[p.pharmacistId]?.fullName ?? '',
+        pharmacistId: p.pharmacistId,
+        createdBy: createdBy,
+      );
+      batch.set(_shifts.doc(), shift.toMap());
+      generated.add(shift);
+      ops++;
+      await flushIfFull();
     }
     if (ops > 0) await batch.commit();
 
@@ -285,7 +309,7 @@ class ScheduleService {
       generated: generated,
       replaceExisting: replaceExisting,
     );
-    return created;
+    return generated.length;
   }
 
   /// Mirrors freshly generated shifts into the read-only `originalShifts`

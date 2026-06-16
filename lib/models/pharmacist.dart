@@ -11,6 +11,8 @@ class Pharmacist {
     this.lastname = '',
     this.nickname = '',
     this.queue = 0,
+    this.showOrder = 0,
+    this.partTime = false,
     this.uid,
   });
 
@@ -24,8 +26,17 @@ class Pharmacist {
   final String lastname;
   final String nickname;
 
-  /// Queue number (เลขที่ Que); also the sort order of roster rows.
+  /// Queue number (เลขที่ Que); the rotation/scheduling order.
   final int queue;
+
+  /// Display order for the Roster/Original tables, independent of [queue]
+  /// (e.g. by seniority, "oldest first"). 0 = unset → falls back to [queue].
+  final int showOrder;
+
+  /// A part-time pharmacist is left out of the default rotation queue, so
+  /// auto-schedule never gives them the regular shifts. They are only assigned
+  /// where added explicitly to a shift type's custom rotation.
+  final bool partTime;
 
   /// Uid of the linked user account, if any.
   final String? uid;
@@ -42,6 +53,15 @@ class Pharmacist {
   String get displayName =>
       nickname.isEmpty ? fullName : '$fullName ($nickname)';
 
+  /// Orders pharmacists for UI display by [showOrder], with 0 ("unset") sorting
+  /// after the explicitly-ordered ones, then by [queue]. Used everywhere
+  /// pharmacists are listed; the auto-scheduler still rotates by [queue].
+  static int byShowOrder(Pharmacist a, Pharmacist b) {
+    int rank(Pharmacist p) => p.showOrder == 0 ? 1 << 30 : p.showOrder;
+    final byShow = rank(a).compareTo(rank(b));
+    return byShow != 0 ? byShow : a.queue.compareTo(b.queue);
+  }
+
   factory Pharmacist.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? {};
     return Pharmacist(
@@ -51,6 +71,8 @@ class Pharmacist {
       lastname: data['lastname'] as String? ?? '',
       nickname: data['nickname'] as String? ?? '',
       queue: data['queue'] as int? ?? 0,
+      showOrder: data['showOrder'] as int? ?? 0,
+      partTime: data['partTime'] as bool? ?? false,
       uid: data['uid'] as String?,
     );
   }
@@ -61,6 +83,8 @@ class Pharmacist {
         'lastname': lastname,
         'nickname': nickname,
         'queue': queue,
+        'showOrder': showOrder,
+        'partTime': partTime,
         'uid': uid,
       };
 }

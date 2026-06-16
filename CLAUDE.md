@@ -17,8 +17,13 @@ shift rosters. Firebase Auth (Google) + Cloud Firestore + Firebase Hosting.
   ```
 - **Always build with `--pwa-strategy=none`** — the Flutter service worker
   made new deploys invisible on first load ("works in dev, not in prod").
-  Hosting headers in `firebase.json` handle caching instead (immutable hashed
-  assets, no-cache index.html).
+  Hosting headers in `firebase.json` handle caching instead. NOTE: Flutter does
+  **not** content-hash `main.dart.js` / `flutter_bootstrap.js` / `flutter.js`
+  (stable filenames), so those + index.html are served **no-cache** (the headers
+  list those explicitly, after the immutable `*.js` rule, so the later rule
+  wins). Only genuinely-hashed chunks/assets stay `immutable`. Caching
+  `main.dart.js` immutable served stale builds after deploys (an "uncaught error
+  persists after the fix" bug) — don't revert that.
 - Rules changes: edit `firestore.rules`, then
   `firebase deploy --only firestore:rules --project pharmacist-schedule`.
   Rules deployed = required; undeployed rules caused the original

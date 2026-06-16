@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_text.dart';
 import '../models/app_user.dart';
 import '../models/holiday.dart';
 import '../models/pharmacist.dart';
@@ -12,6 +13,7 @@ import '../widgets/auto_schedule_dialog.dart';
 import '../widgets/day_shifts_panel.dart';
 import '../widgets/month_calendar.dart';
 import '../widgets/roster_table.dart';
+import '../widgets/settings_dialog.dart';
 import '../widgets/shift_editor_dialog.dart';
 import 'holidays_screen.dart';
 import 'manage_users_screen.dart';
@@ -117,15 +119,12 @@ class _HomeScreenState extends State<HomeScreen> {
     String? presetPharmacistId,
   }) async {
     final isAdmin = widget.user.role.isAdmin;
+    final t = AppText.of(context);
     if (_types.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            isAdmin
-                ? 'No shift types configured yet. Add them under '
-                      'avatar menu → Shift types.'
-                : 'No shift types configured yet. Ask an admin to set them up.',
-          ),
+          content:
+              Text(isAdmin ? t.noShiftTypesAdmin : t.noShiftTypesUser),
         ),
       );
       return;
@@ -133,12 +132,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_pharmacists.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            isAdmin
-                ? 'No pharmacists configured yet. Add them under '
-                      'avatar menu → Pharmacists.'
-                : 'No pharmacists configured yet. Ask an admin to add them.',
-          ),
+          content:
+              Text(isAdmin ? t.noPharmacistsAdmin : t.noPharmacistsUser),
         ),
       );
       return;
@@ -161,25 +156,21 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Could not save shift: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppText.of(context).couldNotSaveShift(e))),
+        );
       }
     }
   }
 
   Future<void> _runAutoSchedule() async {
     final isAdmin = widget.user.role.isAdmin;
+    final t = AppText.of(context);
     if (_types.isEmpty || _pharmacists.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            isAdmin
-                ? 'Configure shift types and pharmacists first '
-                      '(avatar menu → Shift types / Pharmacists).'
-                : 'Shift types and pharmacists are not configured yet. '
-                      'Ask an admin to set them up.',
-          ),
+          content:
+              Text(isAdmin ? t.configureFirstAdmin : t.configureFirstUser),
         ),
       );
       return;
@@ -188,7 +179,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (request == null || !mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
-      const SnackBar(content: Text('Generating schedule…')),
+      SnackBar(content: Text(t.generatingSchedule)),
     );
     try {
       final created = await _service.autoSchedule(
@@ -197,16 +188,14 @@ class _HomeScreenState extends State<HomeScreen> {
         types: _types,
         pharmacists: _pharmacists,
         createdBy: widget.user.uid,
+        holidayKeys: _holidaysByDate.keys.toSet(),
         replaceExisting: request.replaceExisting,
       );
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            created == 0
-                ? 'Nothing to schedule: the selected months are already '
-                      'filled.'
-                : 'Auto-scheduled $created shifts.',
+            created == 0 ? t.nothingToSchedule : t.autoScheduledN(created),
           ),
         ),
       );
@@ -221,7 +210,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(
-        SnackBar(content: Text('Auto schedule failed: $e')),
+        SnackBar(content: Text(t.autoScheduleFailed(e))),
       );
     }
   }
@@ -235,42 +224,49 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!_canEdit) return;
     if (cellShifts.isEmpty) {
       _openEditor(day: day, presetPharmacistId: pharmacist.id);
-    } else if (cellShifts.length == 1) {
-      _openEditor(existing: cellShifts.first);
-    } else {
-      // Several shifts in one cell: let the editor pick which one.
-      showDialog<void>(
-        context: context,
-        builder: (ctx) => SimpleDialog(
-          title: Text(
-            '${pharmacist.fullName} · ${DateFormat('d MMM').format(day)}',
-          ),
-          children: [
-            for (final shift in cellShifts)
-              SimpleDialogOption(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _openEditor(existing: shift);
-                },
-                child: Text('${shift.start}–${shift.end}'),
-              ),
+      return;
+    }
+    // One or more existing shifts: let the user pick which to edit, or add
+    // another — so a pharmacist can hold a second shift that day (e.g. after a
+    // swap they end up on both morning and night).
+    String typeLabel(Shift s) {
+      for (final t in _types) {
+        if (t.id == s.typeId) return t.label;
+      }
+      return s.typeId.isEmpty ? '?' : s.typeId;
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(
+          '${pharmacist.fullName} · ${DateFormat('d MMM').format(day)}',
+        ),
+        children: [
+          for (final shift in cellShifts)
             SimpleDialogOption(
               onPressed: () {
                 Navigator.pop(ctx);
-                _openEditor(day: day, presetPharmacistId: pharmacist.id);
+                _openEditor(existing: shift);
               },
-              child: const Row(
-                children: [
-                  Icon(Icons.add, size: 18),
-                  SizedBox(width: 8),
-                  Text('Add another shift'),
-                ],
-              ),
+              child: Text('${typeLabel(shift)} · ${shift.start}–${shift.end}'),
             ),
-          ],
-        ),
-      );
-    }
+          SimpleDialogOption(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openEditor(day: day, presetPharmacistId: pharmacist.id);
+            },
+            child: Row(
+              children: [
+                const Icon(Icons.add, size: 18),
+                const SizedBox(width: 8),
+                Text(AppText.of(context).addAnotherShift),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -301,12 +297,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     return LayoutBuilder(
                       builder: (context, constraints) {
                         final isWide = constraints.maxWidth >= _kWideBreakpoint;
+                        final t = AppText.of(context);
                         return Scaffold(
                           appBar: _buildAppBar(context, isWide),
                           floatingActionButton: _canEdit && !isWide
                               ? FloatingActionButton(
                                   onPressed: () => _openEditor(),
-                                  tooltip: 'Add shift',
+                                  tooltip: t.addShift,
                                   child: const Icon(Icons.add),
                                 )
                               : null,
@@ -315,7 +312,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               if (snap.hasError)
                                 MaterialBanner(
                                   content: Text(
-                                    'Could not load shifts: ${snap.error}',
+                                    t.couldNotLoadShifts(snap.error ?? ''),
                                   ),
                                   actions: const [SizedBox.shrink()],
                                 ),
@@ -341,10 +338,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                           Icons.person,
                                           size: 18,
                                         ),
-                                        label: isWide
-                                            ? const Text('My shifts')
-                                            : null,
-                                        tooltip: 'My shifts',
+                                        label:
+                                            isWide ? Text(t.viewMine) : null,
+                                        tooltip: t.viewMine,
                                       ),
                                     ButtonSegment(
                                       value: _RosterView.day,
@@ -352,10 +348,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                         Icons.calendar_month,
                                         size: 18,
                                       ),
-                                      label: isWide
-                                          ? const Text('By day')
-                                          : null,
-                                      tooltip: 'By day',
+                                      label: isWide ? Text(t.viewDay) : null,
+                                      tooltip: t.viewDay,
                                     ),
                                     ButtonSegment(
                                       value: _RosterView.roster,
@@ -363,10 +357,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                         Icons.table_chart,
                                         size: 18,
                                       ),
-                                      label: isWide
-                                          ? const Text('Roster')
-                                          : null,
-                                      tooltip: 'Roster table',
+                                      label:
+                                          isWide ? Text(t.viewRoster) : null,
+                                      tooltip: t.viewRosterTooltip,
                                     ),
                                     ButtonSegment(
                                       value: _RosterView.original,
@@ -375,10 +368,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                         size: 18,
                                       ),
                                       label: isWide
-                                          ? const Text('Original')
+                                          ? Text(t.viewOriginal)
                                           : null,
-                                      tooltip:
-                                          'Original (auto-generated, read-only)',
+                                      tooltip: t.viewOriginalTooltip,
                                     ),
                                   ],
                                   selected: {_view},
@@ -415,6 +407,7 @@ class _HomeScreenState extends State<HomeScreen> {
     Map<String, List<Shift>> shiftsByDay,
     Map<String, ShiftType> typesById,
   ) {
+    final t = AppText.of(context);
     if (_view == _RosterView.roster) {
       return RosterTable(
         month: _month,
@@ -437,10 +430,7 @@ class _HomeScreenState extends State<HomeScreen> {
               context,
             ).colorScheme.surfaceContainerHighest,
             leading: const Icon(Icons.lock_outline),
-            content: const Text(
-              'Original auto-generated schedule (read-only). Compare it '
-              'with the Roster tab to spot shift exchanges.',
-            ),
+            content: Text(t.originalBanner),
             actions: const [SizedBox.shrink()],
           ),
           Expanded(
@@ -472,11 +462,7 @@ class _HomeScreenState extends State<HomeScreen> {
           .toSet();
       if (myIds.isEmpty) {
         banner = MaterialBanner(
-          content: const Text(
-            'Your account is not linked to a pharmacist yet, so there is '
-            'nothing to show here. Ask an admin to link it under '
-            'Pharmacists.',
-          ),
+          content: Text(t.myShiftsNotLinked),
           leading: const Icon(Icons.link_off),
           actions: const [SizedBox.shrink()],
         );
@@ -578,6 +564,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   AppBar _buildAppBar(BuildContext context, bool isWide) {
     final user = widget.user;
+    final t = AppText.of(context);
     return AppBar(
       title: Row(
         mainAxisSize: MainAxisSize.min,
@@ -586,7 +573,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(width: 8),
           Flexible(
             child: Text(
-              isWide ? 'Pharmacy Work Schedule' : 'Pharmacy Schedule',
+              isWide ? t.appTitle : t.appTitleShort,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -594,18 +581,23 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       actions: [
         if (_isGuest) ...[
+          IconButton(
+            tooltip: t.settingsTitle,
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => showSettingsDialog(context),
+          ),
           Center(
             child: FilledButton.tonalIcon(
               onPressed: widget.onSignIn,
               icon: const Icon(Icons.login, size: 18),
-              label: const Text('Sign in'),
+              label: Text(t.signIn),
             ),
           ),
           const SizedBox(width: 12),
         ] else ...[
           if (_canEdit)
             IconButton(
-              tooltip: 'Auto schedule',
+              tooltip: t.autoSchedule,
               icon: const Icon(Icons.auto_awesome),
               onPressed: _runAutoSchedule,
             ),
@@ -615,7 +607,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Chip(
                 visualDensity: VisualDensity.compact,
                 label: Text(
-                  user.role.label,
+                  t.roleLabel(user.role),
                   style: const TextStyle(fontSize: 12),
                 ),
               ),
@@ -656,51 +648,60 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const PopupMenuDivider(),
               if (user.role.isAdmin) ...[
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'users',
                   child: ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.manage_accounts),
-                    title: Text('Manage users'),
+                    leading: const Icon(Icons.manage_accounts),
+                    title: Text(t.menuManageUsers),
                   ),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'shiftTypes',
                   child: ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.tune),
-                    title: Text('Shift types'),
+                    leading: const Icon(Icons.tune),
+                    title: Text(t.menuShiftTypes),
                   ),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'pharmacists',
                   child: ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.groups),
-                    title: Text('Pharmacists'),
+                    leading: const Icon(Icons.groups),
+                    title: Text(t.menuPharmacists),
                   ),
                 ),
               ],
               // Visible to every signed-in user (read-only unless admin).
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'holidays',
                 child: ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.event_busy),
-                  title: Text('Holidays'),
+                  leading: const Icon(Icons.event_busy),
+                  title: Text(t.menuHolidays),
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
+                value: 'settings',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.settings_outlined),
+                  title: Text(t.menuSettings),
+                ),
+              ),
+              PopupMenuItem(
                 value: 'signout',
                 child: ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.logout),
-                  title: Text('Sign out'),
+                  leading: const Icon(Icons.logout),
+                  title: Text(t.signOut),
                 ),
               ),
             ],
@@ -720,7 +721,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => ShiftTypesScreen(service: _service),
+                      builder: (_) => ShiftTypesScreen(
+                        service: _service,
+                        pharmacists: _pharmacists,
+                      ),
                     ),
                   );
                 case 'pharmacists':
@@ -740,6 +744,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   );
+                case 'settings':
+                  showSettingsDialog(context);
                 case 'signout':
                   widget.auth.signOut();
               }
@@ -767,13 +773,14 @@ class _MonthBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppText.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
       child: Row(
         children: [
           IconButton(
             onPressed: onPrev,
-            tooltip: 'Previous month',
+            tooltip: t.previousMonth,
             icon: const Icon(Icons.chevron_left),
           ),
           Expanded(
@@ -786,10 +793,10 @@ class _MonthBar extends StatelessWidget {
               ),
             ),
           ),
-          TextButton(onPressed: onToday, child: const Text('Today')),
+          TextButton(onPressed: onToday, child: Text(t.today)),
           IconButton(
             onPressed: onNext,
-            tooltip: 'Next month',
+            tooltip: t.nextMonth,
             icon: const Icon(Icons.chevron_right),
           ),
         ],

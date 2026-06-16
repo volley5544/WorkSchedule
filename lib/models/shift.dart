@@ -39,6 +39,29 @@ class Shift {
 
   DateTime get date => DateTime.parse(dateKey);
 
+  /// Minutes past midnight of [start], for ordering shifts by start time.
+  /// Parses `HH:mm` robustly so unpadded/legacy values ('8:30') still sort
+  /// correctly. Returns 0 when the time is missing/unparseable.
+  int get startMinutes {
+    final parts = start.split(':');
+    return (int.tryParse(parts[0]) ?? 0) * 60 +
+        (int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0);
+  }
+
+  /// Orders shifts by start time (earliest first), then by end time so two
+  /// shifts that start together keep a stable order.
+  static int byStartTime(Shift a, Shift b) {
+    final byStart = a.startMinutes.compareTo(b.startMinutes);
+    if (byStart != 0) return byStart;
+    int endMin(Shift s) {
+      final parts = s.end.split(':');
+      return (int.tryParse(parts[0]) ?? 0) * 60 +
+          (int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0);
+    }
+
+    return endMin(a).compareTo(endMin(b));
+  }
+
   static String keyFor(DateTime day) =>
       '${day.year.toString().padLeft(4, '0')}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
 

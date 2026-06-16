@@ -6,10 +6,22 @@ import '../services/schedule_service.dart';
 
 /// Admin-only screen for managing the pharmacist roster list (name, queue
 /// number, optional link to a signed-in account for the "My shifts" view).
-class PharmacistsScreen extends StatelessWidget {
+class PharmacistsScreen extends StatefulWidget {
   const PharmacistsScreen({super.key, required this.service});
 
   final ScheduleService service;
+
+  @override
+  State<PharmacistsScreen> createState() => _PharmacistsScreenState();
+}
+
+class _PharmacistsScreenState extends State<PharmacistsScreen> {
+  ScheduleService get service => widget.service;
+
+  /// When true the list is arranged by the table **display order** (showOrder);
+  /// when false it's arranged by the **scheduling queue**. Dragging reorders
+  /// whichever one is active.
+  bool _byDisplay = true;
 
   Future<void> _edit(
     BuildContext context, {
@@ -33,6 +45,31 @@ class PharmacistsScreen extends StatelessWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not save pharmacist: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _reorder(
+    BuildContext context,
+    List<Pharmacist> pharmacists,
+    int oldIndex,
+    int newIndex,
+  ) async {
+    // ReorderableListView reports newIndex as the slot before removal.
+    if (newIndex > oldIndex) newIndex -= 1;
+    if (newIndex == oldIndex) return;
+    final reordered = [...pharmacists];
+    reordered.insert(newIndex, reordered.removeAt(oldIndex));
+    try {
+      await service.reorderPharmacists(
+        reordered.map((p) => p.id).toList(),
+        byDisplay: _byDisplay,
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not reorder pharmacists: $e')),
         );
       }
     }
@@ -147,46 +184,120 @@ class PharmacistsScreen extends StatelessWidget {
                     ),
                   );
                 }
-                return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 88),
-                  itemCount: pharmacists.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, i) {
-                    final pharmacist = pharmacists[i];
-                    final linked = users
-                        .where((u) => u.uid == pharmacist.uid)
-                        .firstOrNull;
-                    return ListTile(
-                      leading: CircleAvatar(
-                        child: Text('${pharmacist.queue}'),
-                      ),
-                      title: Text(pharmacist.displayName,
-                          style:
-                              const TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text(linked == null
-                          ? 'Not linked to an account'
-                          : 'Linked to ${linked.email}'),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            tooltip: 'Edit',
-                            icon: const Icon(Icons.edit_outlined),
-                            onPressed: () => _edit(context,
-                                users: users,
-                                titles: titles,
-                                existing: pharmacist,
-                                nextQueue: nextQueue),
+                // Display the list in the active mode's order. Scheduling
+                // always uses the queue regardless of this view.
+                final displayed = _byDisplay
+                    ? ([...pharmacists]..sort(Pharmacist.byShowOrder))
+                    : pharmacists;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                      child: SegmentedButton<bool>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(
+                            value: true,
+                            icon: Icon(Icons.format_list_numbered, size: 18),
+                            label: Text('Display order'),
                           ),
-                          IconButton(
-                            tooltip: 'Remove',
-                            icon: const Icon(Icons.delete_outline),
-                            onPressed: () => _delete(context, pharmacist),
+                          ButtonSegment(
+                            value: false,
+                            icon: Icon(Icons.repeat, size: 18),
+                            label: Text('Schedule queue'),
                           ),
                         ],
+                        selected: {_byDisplay},
+                        onSelectionChanged: (s) =>
+                            setState(() => _byDisplay = s.first),
                       ),
-                    );
-                  },
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                      child: Text(
+                        _byDisplay
+                            ? 'Drag to set the table display order — used '
+                                'everywhere pharmacists are listed.'
+                            : 'Drag to set the queue number (เลขที่ Que) — the '
+                                'auto-schedule rotation order.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                      ),
+                    ),
+                    Expanded(
+                      child: ReorderableListView.builder(
+                        padding: const EdgeInsets.fromLTRB(8, 8, 8, 88),
+                        buildDefaultDragHandles: false,
+                        itemCount: displayed.length,
+                        onReorder: (oldIndex, newIndex) =>
+                            _reorder(context, displayed, oldIndex, newIndex),
+                        itemBuilder: (context, i) {
+                          final pharmacist = displayed[i];
+                          final linked = users
+                              .where((u) => u.uid == pharmacist.uid)
+                              .firstOrNull;
+                          final showOrderText = pharmacist.showOrder == 0
+                              ? '–'
+                              : '${pharmacist.showOrder}';
+                          final badge = _byDisplay
+                              ? showOrderText
+                              : '${pharmacist.queue}';
+                          final other = _byDisplay
+                              ? 'Que ${pharmacist.queue}'
+                              : 'Display $showOrderText';
+                          return Column(
+                            key: ValueKey(pharmacist.id),
+                            children: [
+                              ListTile(
+                                leading: CircleAvatar(child: Text(badge)),
+                                title: Text(pharmacist.displayName,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600)),
+                                subtitle: Text(
+                                  '$other'
+                                  '${pharmacist.partTime ? ' · Part-time' : ''}'
+                                  ' · ${linked == null ? 'Not linked' : 'Linked to ${linked.email}'}',
+                                ),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    ReorderableDragStartListener(
+                                      index: i,
+                                      child: const Padding(
+                                        padding: EdgeInsets.symmetric(
+                                            horizontal: 4),
+                                        child: Icon(Icons.drag_handle),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Edit',
+                                      icon: const Icon(Icons.edit_outlined),
+                                      onPressed: () => _edit(context,
+                                          users: users,
+                                          titles: titles,
+                                          existing: pharmacist,
+                                          nextQueue: nextQueue),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Remove',
+                                      icon: const Icon(Icons.delete_outline),
+                                      onPressed: () =>
+                                          _delete(context, pharmacist),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Divider(height: 1),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 );
               }),
             );
@@ -227,6 +338,9 @@ class _PharmacistDialogState extends State<_PharmacistDialog> {
       TextEditingController(text: widget.existing?.nickname ?? '');
   late final _queueCtrl = TextEditingController(
       text: '${widget.existing?.queue ?? widget.nextQueue}');
+  late final _showOrderCtrl =
+      TextEditingController(text: '${widget.existing?.showOrder ?? 0}');
+  late bool _partTime = widget.existing?.partTime ?? false;
   late String? _uid = widget.existing?.uid;
 
   bool get _isNew => widget.existing == null;
@@ -237,6 +351,7 @@ class _PharmacistDialogState extends State<_PharmacistDialog> {
     _lastnameCtrl.dispose();
     _nicknameCtrl.dispose();
     _queueCtrl.dispose();
+    _showOrderCtrl.dispose();
     super.dispose();
   }
 
@@ -251,6 +366,8 @@ class _PharmacistDialogState extends State<_PharmacistDialog> {
         lastname: _lastnameCtrl.text.trim(),
         nickname: _nicknameCtrl.text.trim(),
         queue: int.parse(_queueCtrl.text.trim()),
+        showOrder: int.tryParse(_showOrderCtrl.text.trim()) ?? 0,
+        partTime: _partTime,
         uid: _uid,
       ),
     );
@@ -320,13 +437,43 @@ class _PharmacistDialogState extends State<_PharmacistDialog> {
               TextFormField(
                 controller: _queueCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Queue number (roster order)',
+                  labelText: 'Queue number (เลขที่ Que — scheduling order)',
                   border: OutlineInputBorder(),
                 ),
                 keyboardType: TextInputType.number,
                 validator: (v) => int.tryParse(v?.trim() ?? '') == null
                     ? 'Enter a number'
                     : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _showOrderCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Table display order (oldest first; 0 = use queue)',
+                  helperText: 'Orders the Roster/Original tables only — not the '
+                      'scheduling rotation.',
+                  helperMaxLines: 2,
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+                validator: (v) {
+                  final t = v?.trim() ?? '';
+                  return t.isEmpty || int.tryParse(t) != null
+                      ? null
+                      : 'Enter a number';
+                },
+              ),
+              const SizedBox(height: 4),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Part-time'),
+                subtitle: Text(
+                  'Left out of the normal auto-schedule rotation. Only gets '
+                  'shifts where added to a shift type\'s custom rotation.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                value: _partTime,
+                onChanged: (v) => setState(() => _partTime = v),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String?>(

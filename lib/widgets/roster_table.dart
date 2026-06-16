@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_text.dart';
 import '../models/pharmacist.dart';
 import '../models/shift.dart';
 import '../models/shift_type.dart';
@@ -54,8 +55,10 @@ class _RosterTableState extends State<RosterTable> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = AppText.of(context);
     final month = widget.month;
-    final pharmacists = widget.pharmacists;
+    // Rows follow the table display order (showOrder), falling back to queue.
+    final pharmacists = [...widget.pharmacists]..sort(Pharmacist.byShowOrder);
     final shiftsByDay = widget.shiftsByDay;
     final typesById = widget.typesById;
     final holidaysByDate = widget.holidaysByDate;
@@ -63,7 +66,8 @@ class _RosterTableState extends State<RosterTable> {
     final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
     final today = DateTime.now();
 
-    // Index shifts by (pharmacistId, dateKey) for cell lookup.
+    // Index shifts by (pharmacistId, dateKey) for cell lookup, each cell's
+    // shifts ordered by start time (earliest first).
     final byCell = <String, List<Shift>>{};
     for (final dayShifts in shiftsByDay.values) {
       for (final shift in dayShifts) {
@@ -72,14 +76,16 @@ class _RosterTableState extends State<RosterTable> {
             .add(shift);
       }
     }
+    for (final cellShifts in byCell.values) {
+      cellShifts.sort(Shift.byStartTime);
+    }
 
     if (pharmacists.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'No pharmacists configured yet.\n'
-            'Admins can add them under avatar menu → Pharmacists.',
+            t.noPharmacistsConfigured,
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
@@ -109,7 +115,7 @@ class _RosterTableState extends State<RosterTable> {
                   _HeaderCell(
                     width: _nameColWidth,
                     child: Text(
-                      'Pharmacist',
+                      t.pharmacistColumn,
                       style: theme.textTheme.labelLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),

@@ -1,15 +1,24 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
 
 import 'firebase_options.dart';
+import 'l10n/app_text.dart';
 import 'models/app_user.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'services/app_settings.dart';
 import 'services/auth_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Load locale date symbols so DateFormat works for Thai (and any locale),
+  // not just the default en_US — otherwise formatting throws on first render.
+  await initializeDateFormatting();
+  await AppSettings.instance.load();
   String? setupError;
   try {
     await Firebase.initializeApp(
@@ -28,23 +37,41 @@ class WorkScheduleApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Pharmacy Work Schedule',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF00897B)),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00897B),
-          brightness: Brightness.dark,
-        ),
-      ),
-      home: setupError != null
-          ? _SetupErrorScreen(error: setupError!)
-          : const _AuthGate(),
+    final settings = AppSettings.instance;
+    return ListenableBuilder(
+      listenable: settings,
+      builder: (context, _) {
+        // Keep intl's default locale in sync so DateFormat output matches the
+        // chosen language.
+        Intl.defaultLocale = settings.locale.languageCode;
+        return MaterialApp(
+          title: 'Pharmacy Work Schedule',
+          debugShowCheckedModeBanner: false,
+          locale: settings.locale,
+          supportedLocales: AppSettings.supportedLocales,
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          themeMode: settings.themeMode,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme:
+                ColorScheme.fromSeed(seedColor: const Color(0xFF00897B)),
+          ),
+          darkTheme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF00897B),
+              brightness: Brightness.dark,
+            ),
+          ),
+          home: setupError != null
+              ? _SetupErrorScreen(error: setupError!)
+              : const _AuthGate(),
+        );
+      },
     );
   }
 }
@@ -125,6 +152,7 @@ class _ProfileErrorScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = AppText.of(context);
     return Scaffold(
       body: Center(
         child: Card(
@@ -140,7 +168,7 @@ class _ProfileErrorScreen extends StatelessWidget {
                   Icon(Icons.error_outline,
                       color: theme.colorScheme.error, size: 32),
                   const SizedBox(width: 12),
-                  Text('Could not load your profile',
+                  Text(t.profileErrorTitle,
                       style: theme.textTheme.titleLarge
                           ?.copyWith(fontWeight: FontWeight.bold)),
                 ]),
@@ -159,7 +187,7 @@ class _ProfileErrorScreen extends StatelessWidget {
                 OutlinedButton.icon(
                   onPressed: onSignOut,
                   icon: const Icon(Icons.logout),
-                  label: const Text('Sign out'),
+                  label: Text(t.signOut),
                 ),
               ],
             ),

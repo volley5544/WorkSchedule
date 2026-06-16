@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_text.dart';
 import '../models/shift.dart';
 import '../models/shift_type.dart';
 
@@ -37,8 +38,6 @@ class MonthCalendar extends StatelessWidget {
   /// the "My shifts" view where every shift belongs to the same person.
   final bool codeOnly;
 
-  static const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
   @override
   Widget build(BuildContext context) {
     final first = DateTime(month.year, month.month, 1);
@@ -47,9 +46,13 @@ class MonthCalendar extends StatelessWidget {
     final totalCells = leadingBlanks + daysInMonth;
     final rows = (totalCells / 7).ceil();
 
+    final t = AppText.of(context);
     return Column(
       children: [
-        _WeekdayHeader(labels: _weekdays, compact: compact),
+        _WeekdayHeader(
+          labels: compact ? t.weekdaysMin : t.weekdaysShort,
+          compact: compact,
+        ),
         for (var row = 0; row < rows; row++)
           Expanded(
             child: Row(
@@ -107,10 +110,7 @@ class _WeekdayHeader extends StatelessWidget {
           for (final label in labels)
             Expanded(
               child: Center(
-                child: Text(
-                  compact ? label.substring(0, 1) : label,
-                  style: style,
-                ),
+                child: Text(label, style: style),
               ),
             ),
         ],
@@ -264,6 +264,12 @@ class _DayCell extends StatelessWidget {
     );
   }
 
+  /// Fixed height reserved for the compact codes row so that days without a
+  /// shift occupy exactly as much space as days with one — otherwise the
+  /// vertically-centered column changes height and the day numbers visibly
+  /// jump around as you scan the month.
+  static const _compactCodesHeight = 18.0;
+
   Widget _buildCompactCodes() {
     // De-duplicate by type but keep schedule order.
     final seen = <String>{};
@@ -272,29 +278,31 @@ class _DayCell extends StatelessWidget {
       final type = _typeOf(shift);
       if (seen.add(type.id)) types.add(type);
     }
-    if (types.isEmpty) return const SizedBox(height: 6);
-    return Wrap(
-      alignment: WrapAlignment.center,
-      spacing: 2,
-      runSpacing: 2,
-      children: [
-        for (final type in types.take(2))
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-            decoration: BoxDecoration(
-              color: type.color.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              type.label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: type.color,
+    if (types.isEmpty) return const SizedBox(height: _compactCodesHeight);
+    return SizedBox(
+      height: _compactCodesHeight,
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        spacing: 2,
+        children: [
+          for (final type in types.take(2))
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: type.color.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                type.label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: type.color,
+                ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -325,7 +333,7 @@ class _DayCell extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(left: 2, top: 1),
                 child: Text(
-                  '+$overflow more',
+                  AppText.of(context).overflowMore(overflow),
                   style: TextStyle(
                     fontSize: 10,
                     color: scheme.onSurfaceVariant,

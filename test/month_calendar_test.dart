@@ -84,4 +84,25 @@ void main() {
   test('Shift.keyFor pads single digits', () {
     expect(Shift.keyFor(DateTime(2026, 6, 5)), '2026-06-05');
   });
+
+  test('Shift.byStartTime orders by start time, even unpadded', () {
+    Shift at(String start, String end) => Shift(
+          id: start,
+          dateKey: '2026-06-06',
+          typeId: 't',
+          start: start,
+          end: end,
+          pharmacist: 'A',
+        );
+    final shifts = [
+      at('23:30', '08:30'), // ด (night)
+      at('8:30', '16:30'), // ช, unpadded
+      at('16:30', '23:30'), // บ
+      at('16:30', '20:30'), // ย, same start as บ but ends earlier
+    ]..sort(Shift.byStartTime);
+    expect(
+      shifts.map((s) => '${s.start}-${s.end}').toList(),
+      ['8:30-16:30', '16:30-20:30', '16:30-23:30', '23:30-08:30'],
+    );
+  });
 }

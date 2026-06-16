@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_text.dart';
 import '../models/pharmacist.dart';
 import '../models/shift.dart';
 import '../models/shift_type.dart';
@@ -73,9 +74,9 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
 
   /// Same trick for the pharmacist: a shift whose pharmacist was removed
   /// from the config (or a legacy free-text shift) stays selectable under
-  /// its saved name.
+  /// its saved name. Listed in the table display order (showOrder).
   late final List<Pharmacist> _pharmacists = [
-    ...widget.pharmacists,
+    ...[...widget.pharmacists]..sort(Pharmacist.byShowOrder),
     if (widget.existing != null &&
         !widget.pharmacists.any((p) => p.id == widget.existing!.pharmacistId))
       Pharmacist(
@@ -153,6 +154,7 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
   }
 
   Future<void> _confirmDelete() async {
+    final t = AppText.of(context);
     final typeLabel = _types
         .firstWhere((t) => t.id == widget.existing!.typeId,
             orElse: () => ShiftType.unknown(widget.existing!.typeId))
@@ -160,16 +162,16 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete shift?'),
-        content: Text(
-            'Remove ${widget.existing!.pharmacist}\'s "$typeLabel" shift?'),
+        title: Text(t.deleteShiftTitle),
+        content:
+            Text(t.deleteShiftBody(widget.existing!.pharmacist, typeLabel)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+              child: Text(t.cancel)),
           FilledButton.tonal(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete')),
+              child: Text(t.delete)),
         ],
       ),
     );
@@ -180,8 +182,9 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppText.of(context);
     return AlertDialog(
-      title: Text(_isNew ? 'Add shift' : 'Edit shift'),
+      title: Text(_isNew ? t.addShift : t.editShift),
       content: Form(
         key: _formKey,
         child: SizedBox(
@@ -197,8 +200,9 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: _typeId,
-                decoration: const InputDecoration(
-                    labelText: 'Shift type', border: OutlineInputBorder()),
+                decoration: InputDecoration(
+                    labelText: t.fieldShiftType,
+                    border: const OutlineInputBorder()),
                 items: [
                   for (final type in _types)
                     DropdownMenuItem(
@@ -255,8 +259,9 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: _pharmacistId,
-                decoration: const InputDecoration(
-                    labelText: 'Pharmacist', border: OutlineInputBorder()),
+                decoration: InputDecoration(
+                    labelText: t.fieldPharmacist,
+                    border: const OutlineInputBorder()),
                 items: [
                   for (final pharmacist in _pharmacists)
                     DropdownMenuItem(
@@ -272,9 +277,9 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
               const SizedBox(height: 12),
               TextFormField(
                 controller: _noteCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Note (optional)',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: t.fieldNote,
+                  border: const OutlineInputBorder(),
                 ),
                 maxLines: 2,
               ),
@@ -288,12 +293,12 @@ class _ShiftEditorDialogState extends State<_ShiftEditorDialog> {
             onPressed: _confirmDelete,
             style: TextButton.styleFrom(
                 foregroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Delete'),
+            child: Text(t.delete),
           ),
         TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel')),
-        FilledButton(onPressed: _submit, child: const Text('Save')),
+            child: Text(t.cancel)),
+        FilledButton(onPressed: _submit, child: Text(t.save)),
       ],
     );
   }

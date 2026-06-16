@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_text.dart';
+
 /// What the user picked in the auto-schedule dialog.
 typedef AutoScheduleRequest = ({
   DateTime startMonth,
@@ -39,19 +41,20 @@ class _AutoScheduleDialogState extends State<_AutoScheduleDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = AppText.of(context);
     return AlertDialog(
-      title: const Text('Auto schedule'),
+      title: Text(t.autoSchedule),
       content: SizedBox(
         width: 360,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Start month', style: theme.textTheme.labelLarge),
+            Text(t.startMonth, style: theme.textTheme.labelLarge),
             Row(
               children: [
                 IconButton(
-                  tooltip: 'Previous month',
+                  tooltip: t.previousMonth,
                   icon: const Icon(Icons.chevron_left),
                   onPressed: () => _shiftStart(-1),
                 ),
@@ -65,7 +68,7 @@ class _AutoScheduleDialogState extends State<_AutoScheduleDialog> {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Next month',
+                  tooltip: t.nextMonth,
                   icon: const Icon(Icons.chevron_right),
                   onPressed: () => _shiftStart(1),
                 ),
@@ -74,14 +77,13 @@ class _AutoScheduleDialogState extends State<_AutoScheduleDialog> {
             const SizedBox(height: 12),
             DropdownButtonFormField<int>(
               initialValue: _months,
-              decoration: const InputDecoration(
-                labelText: 'Months to fill',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: t.monthsToFill,
+                border: const OutlineInputBorder(),
               ),
               items: [
                 for (var m = 1; m <= 6; m++)
-                  DropdownMenuItem(
-                      value: m, child: Text('$m month${m == 1 ? '' : 's'}')),
+                  DropdownMenuItem(value: m, child: Text(t.monthCount(m))),
               ],
               onChanged: (m) {
                 if (m != null) setState(() => _months = m);
@@ -90,13 +92,9 @@ class _AutoScheduleDialogState extends State<_AutoScheduleDialog> {
             const SizedBox(height: 8),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Regenerate existing months'),
+              title: Text(t.regenerateExisting),
               subtitle: Text(
-                _replaceExisting
-                    ? 'All shifts in the selected months are deleted and '
-                        'rescheduled from scratch.'
-                    : 'Existing shifts are kept; only empty slots are '
-                        'filled.',
+                _replaceExisting ? t.regenerateOn : t.regenerateOff,
                 style: theme.textTheme.bodySmall,
               ),
               value: _replaceExisting,
@@ -104,10 +102,7 @@ class _AutoScheduleDialogState extends State<_AutoScheduleDialog> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Assigns one pharmacist per shift in queue order '
-              '(1 → 2 → 3 → …), day by day, for every shift type active on '
-              'that weekday. The rotation continues from the last shift of '
-              'the month before the start month.',
+              t.autoScheduleHelp,
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
@@ -117,14 +112,14 @@ class _AutoScheduleDialogState extends State<_AutoScheduleDialog> {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel')),
+            child: Text(t.cancel)),
         FilledButton(
           onPressed: () => Navigator.pop(context, (
             startMonth: _startMonth,
             months: _months,
             replaceExisting: _replaceExisting,
           )),
-          child: const Text('Generate'),
+          child: Text(t.generate),
         ),
       ],
     );

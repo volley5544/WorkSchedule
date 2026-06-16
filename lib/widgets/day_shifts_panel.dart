@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_text.dart';
 import '../models/shift.dart';
 import '../models/shift_type.dart';
 
@@ -33,6 +34,7 @@ class DayShiftsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = AppText.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -50,7 +52,7 @@ class DayShiftsPanel extends StatelessWidget {
               ),
               if (canEdit && onAddShift != null)
                 IconButton(
-                  tooltip: 'Add shift',
+                  tooltip: t.addShift,
                   icon: const Icon(Icons.add_circle_outline),
                   onPressed: onAddShift,
                 ),
@@ -61,7 +63,7 @@ class DayShiftsPanel extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
-              'No shifts scheduled.',
+              t.noShiftsScheduled,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
