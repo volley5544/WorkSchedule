@@ -125,6 +125,7 @@ class ShiftType {
     this.description = '',
     this.days = everyDay,
     this.onHoliday = false,
+    this.singleRotation = false,
     this.roster = const [],
     this.weekdayPins = const {},
     this.followsTypeId = '',
@@ -158,6 +159,13 @@ class ShiftType {
   /// Whether this type is scheduled on holiday dates (which are treated like a
   /// non-working day, independent of [days]).
   final bool onHoliday;
+
+  /// When true, this type runs **every day** (weekday, weekend, and holiday
+  /// alike — [days] and [onHoliday] are ignored) and rotates through **one
+  /// shared counter** instead of separate weekday/weekend/holiday rotations.
+  /// Used by ด (night duty), whose rotation should be a single continuous cycle
+  /// across the whole month regardless of the calendar.
+  final bool singleRotation;
 
   /// Optional custom rotation. Empty = rotate through the global pharmacist
   /// queue with no constraints (the default for ช/ย/บ).
@@ -217,6 +225,7 @@ class ShiftType {
       color: Color(data['color'] as int? ?? 0xFF9E9E9E),
       days: (data['days'] as List?)?.cast<int>() ?? everyDay,
       onHoliday: data['onHoliday'] as bool? ?? false,
+      singleRotation: data['singleRotation'] as bool? ?? false,
       roster:
           (data['roster'] as List?)
                   ?.map((e) => RosterEntry.fromMap((e as Map).cast()))
@@ -242,6 +251,7 @@ class ShiftType {
         'color': color.toARGB32(),
         'days': days,
         'onHoliday': onHoliday,
+        'singleRotation': singleRotation,
         'roster': roster.map((e) => e.toMap()).toList(),
         'weekdayPins': {
           for (final e in weekdayPins.entries) e.key.toString(): e.value,
@@ -258,6 +268,7 @@ class ShiftType {
     Color? color,
     List<int>? days,
     bool? onHoliday,
+    bool? singleRotation,
     List<RosterEntry>? roster,
     Map<int, String>? weekdayPins,
     String? followsTypeId,
@@ -272,6 +283,7 @@ class ShiftType {
         color: color ?? this.color,
         days: days ?? this.days,
         onHoliday: onHoliday ?? this.onHoliday,
+        singleRotation: singleRotation ?? this.singleRotation,
         roster: roster ?? this.roster,
         weekdayPins: weekdayPins ?? this.weekdayPins,
         followsTypeId: followsTypeId ?? this.followsTypeId,

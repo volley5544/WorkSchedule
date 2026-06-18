@@ -6,6 +6,7 @@ import '../l10n/app_text.dart';
 import '../models/pharmacist.dart';
 import '../models/shift.dart';
 import '../models/shift_type.dart';
+import '../services/shift_conflicts.dart';
 
 const _rowHeight = 54.0;
 const _headerHeight = 44.0;
@@ -79,6 +80,9 @@ class _RosterTableState extends State<RosterTable> {
     for (final cellShifts in byCell.values) {
       cellShifts.sort(Shift.byStartTime);
     }
+    final holidayKeys = holidaysByDate.keys.toSet();
+    List<Shift> shiftsFor(String pharmacistId, DateTime date) =>
+        byCell['$pharmacistId|${Shift.keyFor(date)}'] ?? const [];
 
     if (pharmacists.isEmpty) {
       return Center(
@@ -179,9 +183,10 @@ class _RosterTableState extends State<RosterTable> {
                               for (var d = 1; d <= daysInMonth; d++)
                                 _ShiftCell(
                                   day: DateTime(month.year, month.month, d),
-                                  shifts:
-                                      byCell['${pharmacist.id}|${Shift.keyFor(DateTime(month.year, month.month, d))}'] ??
-                                      const [],
+                                  shifts: shiftsFor(
+                                    pharmacist.id,
+                                    DateTime(month.year, month.month, d),
+                                  ),
                                   typesById: typesById,
                                   isToday: DateUtils.isSameDay(
                                     DateTime(month.year, month.month, d),
@@ -191,6 +196,12 @@ class _RosterTableState extends State<RosterTable> {
                                     Shift.keyFor(
                                       DateTime(month.year, month.month, d),
                                     ),
+                                  ),
+                                  conflicts: conflictsForDay(
+                                    day: DateTime(month.year, month.month, d),
+                                    shiftsFor: (date) =>
+                                        shiftsFor(pharmacist.id, date),
+                                    holidayKeys: holidayKeys,
                                   ),
                                   focused:
                                       pharmacist.id == _focusedPharmacistId,
@@ -398,6 +409,7 @@ class _ShiftCell extends StatelessWidget {
     required this.isToday,
     required this.focused,
     this.isHoliday = false,
+    this.conflicts = const {},
     this.onTap,
   });
 
@@ -407,12 +419,18 @@ class _ShiftCell extends StatelessWidget {
   final bool isToday;
   final bool focused;
   final bool isHoliday;
+
+  /// Scheduling problems on this pharmacist's day; non-empty cells are
+  /// highlighted in the error colour with an explanatory tooltip.
+  final Set<ShiftConflict> conflicts;
   final void Function(List<Shift>)? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = AppText.of(context);
     final isWeekend = day.weekday >= DateTime.saturday;
+    final hasConflict = conflicts.isNotEmpty;
     final base = isToday
         ? theme.colorScheme.primaryContainer.withValues(alpha: 0.25)
         : isHoliday
@@ -421,13 +439,21 @@ class _ShiftCell extends StatelessWidget {
         ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45)
         : null;
     // Focused rows get a primary tint layered over the day/weekend shading.
-    final background = focused
+    final focusBlend = focused
         ? Color.alphaBlend(
             theme.colorScheme.primary.withValues(alpha: 0.12),
             base ?? theme.colorScheme.surface,
           )
         : base;
-    return InkWell(
+    // A flagged day overrides the shading with a strong error tint so it stands
+    // out at a glance (distinct from the lighter holiday-column shading).
+    final background = hasConflict
+        ? Color.alphaBlend(
+            theme.colorScheme.error.withValues(alpha: 0.20),
+            focusBlend ?? theme.colorScheme.surface,
+          )
+        : focusBlend;
+    final cell = InkWell(
       onTap: onTap == null ? null : () => onTap!(shifts),
       child: Container(
         width: _dayColWidth,
@@ -436,14 +462,18 @@ class _ShiftCell extends StatelessWidget {
         padding: const EdgeInsets.all(2),
         decoration: BoxDecoration(
           color: background,
-          border: Border(
-            bottom: BorderSide(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
-            ),
-            right: BorderSide(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.25),
-            ),
-          ),
+          border: hasConflict
+              ? Border.all(color: theme.colorScheme.error, width: 1.5)
+              : Border(
+                  bottom: BorderSide(
+                    color: theme.colorScheme.outlineVariant
+                        .withValues(alpha: 0.5),
+                  ),
+                  right: BorderSide(
+                    color: theme.colorScheme.outlineVariant
+                        .withValues(alpha: 0.25),
+                  ),
+                ),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -458,12 +488,26 @@ class _ShiftCell extends StatelessWidget {
                 '+${shifts.length - 2}',
                 style: TextStyle(
                   fontSize: 9,
-                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: hasConflict ? FontWeight.bold : null,
+                  color: hasConflict
+                      ? theme.colorScheme.error
+                      : theme.colorScheme.onSurfaceVariant,
                 ),
               ),
           ],
         ),
       ),
+    );
+    if (!hasConflict) return cell;
+    final reasons = [
+      if (conflicts.contains(ShiftConflict.tooManyShifts))
+        t.conflictTooManyShifts,
+      if (conflicts.contains(ShiftConflict.tooLong)) t.conflictTooLong,
+      if (conflicts.contains(ShiftConflict.overlap)) t.conflictOverlap,
+    ];
+    return Tooltip(
+      message: '${t.conflictTitle}:\n• ${reasons.join('\n• ')}',
+      child: cell,
     );
   }
 }

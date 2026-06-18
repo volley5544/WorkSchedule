@@ -103,6 +103,19 @@ class AppText {
             'Admins can add them under avatar menu → Pharmacists.',
       );
 
+  // Roster conflict highlights (a pharmacist's day flagged for review)
+  String get conflictTitle => _p('ควรตรวจสอบ', 'Needs review');
+  String get conflictTooManyShifts => _p(
+        'เกิน 2 เวรต่อวัน (วันธรรมดานับงาน 08:30–16:30 ด้วย)',
+        'More than 2 duties in a day (weekday 08:30–16:30 work counts)',
+      );
+  String get conflictTooLong => _p(
+        'ทำงานต่อเนื่องเกิน 18 ชั่วโมง',
+        'More than 18h continuous duty',
+      );
+  String get conflictOverlap =>
+      _p('เวลาเวรซ้อนทับกัน', 'Shift times overlap');
+
   // My shifts banner
   String get myShiftsNotLinked => _p(
         'บัญชีของคุณยังไม่ได้เชื่อมกับเภสัชกร จึงยังไม่มีเวรแสดง '

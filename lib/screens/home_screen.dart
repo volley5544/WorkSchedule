@@ -215,6 +215,106 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// One-time admin action: seed the May 2026 starting roster from the
+  /// transcribed spreadsheet. Replaces any existing May 2026 shifts.
+  Future<void> _importMay2026(AppUser user) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Import May 2026 roster'),
+        content: const Text(
+          'This writes the May 2026 (BE 2569) roster to the live schedule '
+          'and the Original baseline, replacing any existing May 2026 shifts. '
+          'Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Importing May 2026…')),
+    );
+    try {
+      final result = await _service.importMay2026(createdBy: user.uid);
+      messenger.hideCurrentSnackBar();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('May 2026 imported'),
+          content: Text(
+            'Created ${result.created} shifts.'
+            '${result.warnings.isEmpty ? '' : '\n\nWarnings:\n• ${result.warnings.join('\n• ')}'}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      if (mounted) {
+        setState(() => _view = _RosterView.roster);
+        final start = DateTime(2026, 5);
+        _setMonth(start, selectedDay: start);
+      }
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text('Import failed: $e')));
+    }
+  }
+
+  /// Admin action: snapshot the current month's live Roster into the read-only
+  /// Original baseline (replacing that month's Original).
+  Future<void> _copyMonthToOriginal() async {
+    final monthLabel = DateFormat('MMMM yyyy').format(_month);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Copy roster → Original'),
+        content: Text(
+          'Copy the current $monthLabel roster into the Original baseline, '
+          'replacing the existing Original for $monthLabel? This does not '
+          'change the editable roster.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Copy'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('Copying…')));
+    try {
+      final copied = await _service.copyMonthToOriginal(_month);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(content: Text('Copied $copied shifts to Original ($monthLabel).')),
+      );
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text('Copy failed: $e')));
+    }
+  }
+
   void _onRosterCell(
     Pharmacist pharmacist,
     DateTime day,
@@ -675,6 +775,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: Text(t.menuPharmacists),
                   ),
                 ),
+                // One-time seed of the May 2026 starting roster (throwaway).
+                const PopupMenuItem(
+                  value: 'importMay2026',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.file_download),
+                    title: Text('Import May 2026 (one-time)'),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'copyToOriginal',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.content_copy),
+                    title: Text('Copy roster → Original (this month)'),
+                  ),
+                ),
               ],
               // Visible to every signed-in user (read-only unless admin).
               PopupMenuItem(
@@ -744,6 +863,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   );
+                case 'importMay2026':
+                  _importMay2026(user);
+                case 'copyToOriginal':
+                  _copyMonthToOriginal();
                 case 'settings':
                   showSettingsDialog(context);
                 case 'signout':

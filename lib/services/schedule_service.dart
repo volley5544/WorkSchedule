@@ -6,6 +6,7 @@ import '../models/pharmacist.dart';
 import '../models/shift.dart';
 import '../models/shift_type.dart';
 import 'schedule_planner.dart';
+import 'seed_may2026.dart';
 
 class ScheduleService {
   final _db = FirebaseFirestore.instance;
@@ -353,6 +354,164 @@ class ScheduleService {
       await flushIfFull();
     }
     if (ops > 0) await batch.commit();
+  }
+
+  /// One-time importer for the **May 2026** (BE 2569) starting roster
+  /// transcribed from the hospital's spreadsheet (see `seed_may2026.dart`).
+  ///
+  /// Resolves each pharmacist by name and each code to a shift type (by label,
+  /// preferring the variant that actually runs that day — e.g. weekday vs
+  /// weekend บ), wipes any existing May 2026 entries so re-running is safe, then
+  /// writes the roster to both `shifts` and the read-only `originalShifts`
+  /// baseline. Returns the number of shifts created and any warnings (pharmacist
+  /// names or codes that couldn't be resolved).
+  Future<({int created, List<String> warnings})> importMay2026({
+    required String createdBy,
+  }) async {
+    final first = DateTime(may2026Year, may2026Month, 1);
+    final last = DateTime(may2026Year, may2026Month + 1, 0);
+    final firstKey = Shift.keyFor(first);
+    final lastKey = Shift.keyFor(last);
+
+    final pharmacists =
+        (await _pharmacists.get()).docs.map(Pharmacist.fromDoc).toList();
+    final types =
+        (await _shiftTypes.get()).docs.map(ShiftType.fromDoc).toList();
+    final holidayKeys = (await _holidays
+            .where('dateKey', isGreaterThanOrEqualTo: firstKey)
+            .where('dateKey', isLessThanOrEqualTo: lastKey)
+            .get())
+        .docs
+        .map((d) => d.id)
+        .toSet();
+
+    String norm(String s) => s.replaceAll(RegExp(r'\s+'), '');
+    final byName = {for (final p in pharmacists) norm(p.fullName): p};
+
+    ShiftType? resolveType(String code, DateTime date) {
+      final label = may2026CodeAliases[code] ?? code;
+      final cands = types
+          .where((t) => t.label.toLowerCase() == label.toLowerCase())
+          .toList()
+        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+      if (cands.isEmpty) return null;
+      final isHoliday = holidayKeys.contains(Shift.keyFor(date));
+      bool runs(ShiftType t) =>
+          isHoliday ? t.onHoliday : t.days.contains(date.weekday);
+      return cands.firstWhere(runs, orElse: () => cands.first);
+    }
+
+    var batch = _db.batch();
+    var ops = 0;
+    Future<void> flushIfFull() async {
+      if (ops < 450) return;
+      await batch.commit();
+      batch = _db.batch();
+      ops = 0;
+    }
+
+    // Wipe existing May 2026 entries in both collections (idempotent re-run).
+    for (final col in [_shifts, _originalShifts]) {
+      final existing = await col
+          .where('dateKey', isGreaterThanOrEqualTo: firstKey)
+          .where('dateKey', isLessThanOrEqualTo: lastKey)
+          .get();
+      for (final doc in existing.docs) {
+        batch.delete(doc.reference);
+        ops++;
+        await flushIfFull();
+      }
+    }
+
+    final unmatchedNames = <String>{};
+    final unmatchedCodes = <String>{};
+    var created = 0;
+
+    for (final entry in may2026Roster.entries) {
+      final pharmacist = byName[norm(entry.key)];
+      if (pharmacist == null) {
+        unmatchedNames.add(entry.key);
+        continue;
+      }
+      for (final dayEntry in entry.value.entries) {
+        final date = DateTime(may2026Year, may2026Month, dayEntry.key);
+        final dateKey = Shift.keyFor(date);
+        for (final code in dayEntry.value) {
+          final type = resolveType(code, date);
+          if (type == null) {
+            unmatchedCodes.add(code);
+            continue;
+          }
+          final shift = Shift(
+            id: '',
+            dateKey: dateKey,
+            typeId: type.id,
+            start: type.start,
+            end: type.end,
+            pharmacist: pharmacist.fullName,
+            pharmacistId: pharmacist.id,
+            createdBy: createdBy,
+          );
+          batch.set(_shifts.doc(), shift.toMap());
+          batch.set(_originalShifts.doc(), shift.toMap());
+          ops += 2;
+          created++;
+          await flushIfFull();
+        }
+      }
+    }
+    if (ops > 0) await batch.commit();
+
+    final warnings = <String>[
+      for (final n in unmatchedNames) 'Pharmacist not matched: $n',
+      for (final c in unmatchedCodes) 'Unknown shift code: $c',
+    ];
+    return (created: created, warnings: warnings);
+  }
+
+  /// Copies the live `shifts` of the month containing [month] into the
+  /// read-only `originalShifts` baseline, wiping that month's baseline first.
+  /// Use to make the current (edited) roster the new "Original" snapshot.
+  /// Returns the number of shifts copied.
+  Future<int> copyMonthToOriginal(DateTime month) async {
+    final first = DateTime(month.year, month.month, 1);
+    final last = DateTime(month.year, month.month + 1, 0);
+    final firstKey = Shift.keyFor(first);
+    final lastKey = Shift.keyFor(last);
+
+    final live = await _shifts
+        .where('dateKey', isGreaterThanOrEqualTo: firstKey)
+        .where('dateKey', isLessThanOrEqualTo: lastKey)
+        .get();
+
+    var batch = _db.batch();
+    var ops = 0;
+    Future<void> flushIfFull() async {
+      if (ops < 450) return;
+      await batch.commit();
+      batch = _db.batch();
+      ops = 0;
+    }
+
+    final old = await _originalShifts
+        .where('dateKey', isGreaterThanOrEqualTo: firstKey)
+        .where('dateKey', isLessThanOrEqualTo: lastKey)
+        .get();
+    for (final doc in old.docs) {
+      batch.delete(doc.reference);
+      ops++;
+      await flushIfFull();
+    }
+
+    var copied = 0;
+    for (final doc in live.docs) {
+      batch.set(_originalShifts.doc(), Shift.fromDoc(doc).toMap());
+      ops++;
+      copied++;
+      await flushIfFull();
+    }
+    if (ops > 0) await batch.commit();
+    return copied;
   }
 
   Stream<List<AppUser>> allUsers() => _db

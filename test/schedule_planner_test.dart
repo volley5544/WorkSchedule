@@ -14,6 +14,7 @@ void main() {
     String id = 't',
     List<int> days = ShiftType.everyDay,
     bool onHoliday = false,
+    bool singleRotation = false,
     List<RosterEntry> roster = const [],
     Map<int, String> weekdayPins = const {},
     String followsTypeId = '',
@@ -29,6 +30,7 @@ void main() {
         color: const Color(0xFF000000),
         days: days,
         onHoliday: onHoliday,
+        singleRotation: singleRotation,
         roster: roster,
         weekdayPins: weekdayPins,
         followsTypeId: followsTypeId,
@@ -94,6 +96,45 @@ void main() {
     expect(bySlot(plan)['2026-06-01|t'], 'p2');
   });
 
+  test('singleRotation: one continuous rotation across every day incl holiday',
+      () {
+    // ด runs every day on one shared counter; weekend/holiday don't reset it.
+    // June 2026: 06-01 Mon … 06-07 Sun, with 06-03 (Wed) marked a holiday.
+    final night = type(id: 'd', singleRotation: true, days: const [1, 2, 3]);
+    final plan = planSchedule(
+      first: DateTime(2026, 6, 1),
+      last: DateTime(2026, 6, 7),
+      types: [night],
+      queue: queueOf(3),
+      holidayKeys: {'2026-06-03'},
+    );
+    final slot = bySlot(plan);
+    // Continuous p1,p2,p3,p1,… across weekday/holiday/weekend with no reset,
+    // and it runs even on days outside `days` (Sat/Sun) and on the holiday.
+    expect(slot['2026-06-01|d'], 'p1');
+    expect(slot['2026-06-02|d'], 'p2');
+    expect(slot['2026-06-03|d'], 'p3'); // holiday — same rotation, not reset
+    expect(slot['2026-06-04|d'], 'p1');
+    expect(slot['2026-06-05|d'], 'p2');
+    expect(slot['2026-06-06|d'], 'p3'); // Saturday — still runs, still continuous
+    expect(slot['2026-06-07|d'], 'p1');
+  });
+
+  test('singleRotation continues from the prior month tail', () {
+    final night = type(id: 'd', singleRotation: true);
+    final plan = planSchedule(
+      first: DateTime(2026, 6, 1),
+      last: DateTime(2026, 6, 2),
+      types: [night],
+      queue: queueOf(3),
+      holidayKeys: const {},
+      priorTail: [planned('2026-05-31', 'd', 'p2')], // last night → next is p3
+    );
+    final slot = bySlot(plan);
+    expect(slot['2026-06-01|d'], 'p3');
+    expect(slot['2026-06-02|d'], 'p1');
+  });
+
   test('weekday and weekend buckets rotate independently', () {
     final plan = planSchedule(
       first: DateTime(2026, 6, 1), // Mon
@@ -146,7 +187,8 @@ void main() {
     expect(slot['2026-06-02|hd'], 'p1');
   });
 
-  test('conflict-skip avoids overlapping double-booking', () {
+  test('no overlap check: each type rotates independently from its own counter',
+      () {
     final yen = type(id: 'y', start: '16:30', end: '20:30', sortOrder: 1);
     final baai = type(id: 'b', start: '16:30', end: '23:30', sortOrder: 2);
     final plan = planSchedule(
@@ -157,14 +199,13 @@ void main() {
       holidayKeys: const {},
     );
     final slot = bySlot(plan);
-    // ย takes p1; บ would also start at p1 but overlaps, so it skips to p2.
+    // Both counters start at p1; the planner no longer skips the overlap, so
+    // both land on p1 (the roster UI flags this day instead).
     expect(slot['2026-06-01|y'], 'p1');
-    expect(slot['2026-06-01|b'], 'p2');
+    expect(slot['2026-06-01|b'], 'p1');
   });
 
-  test('a night shift on a weekday is allowed (17h chain into next day)', () {
-    // Mon ด 23:30→08:30 then Tue normal work 08:30–16:30 = 17h continuous, so
-    // the night shift can be assigned.
+  test('a night shift is assigned to the first person in rotation', () {
     final night = type(id: 'd', start: '23:30', end: '08:30');
     final plan = planSchedule(
       first: DateTime(2026, 6, 1), // Mon
@@ -176,10 +217,10 @@ void main() {
     expect(bySlot(plan)['2026-06-01|d'], 'p1');
   });
 
-  test('after a night shift, the next weekday cannot add an evening shift', () {
-    // The user's case: p1 did Mon normal work + Mon night (→Tue 08:30) + Tue
-    // normal work = 17h. A Tue evening ย would extend that to 21h, so p1 is
-    // skipped and ย goes to p2.
+  test('no continuous-hours cap: a prior night shift no longer blocks next day',
+      () {
+    // p1 worked Mon night (→Tue 08:30); a Tue evening ย used to be blocked by
+    // the old 18h cap. With the cap removed, the rotation just starts at p1.
     final yen = type(id: 'y', start: '16:30', end: '20:30');
     final plan = planSchedule(
       first: DateTime(2026, 6, 2), // Tue
@@ -189,10 +230,11 @@ void main() {
       holidayKeys: const {},
       keptShifts: [planned('2026-06-01', 'd', 'p1', '23:30', '08:30')],
     );
-    expect(bySlot(plan)['2026-06-02|y'], 'p2');
+    expect(bySlot(plan)['2026-06-02|y'], 'p1');
   });
 
-  test('a weekday allows only one scheduled shift on top of normal work', () {
+  test('no per-day cap: a weekday person may take both an evening and a night',
+      () {
     // Tue: normal work + ย = 2 (ok). A night ด would make it 3, so it skips to
     // the next person — even though ด on its own is a separate <18h chain.
     final yen = type(id: 'y', start: '16:30', end: '20:30', sortOrder: 1);
@@ -205,12 +247,14 @@ void main() {
       holidayKeys: const {},
     );
     final slot = bySlot(plan);
-    expect(slot['2026-06-02|y'], 'p1'); // normal + ย = 2 duty items
-    expect(slot['2026-06-02|d'], 'p2'); // p1 would be normal + ย + ด = 3
+    expect(slot['2026-06-02|y'], 'p1');
+    expect(slot['2026-06-02|d'], 'p1'); // no per-day cap → same person is fine
   });
 
-  test('a weekend allows two scheduled shifts but caps at the third', () {
-    // No normal work on a weekend, so ช + บ = 2 is fine, but ด makes 3.
+  test('no per-day cap: one weekend person may take ch + b + d (a full 24h)',
+      () {
+    // Each type's rotation starts at p1 and the shifts don't overlap, so all
+    // three land on p1 — a full 24h, now permitted.
     final ch =
         type(id: 'ch', days: const [6, 7], start: '08:30', end: '16:30');
     final baai = type(
@@ -234,37 +278,8 @@ void main() {
     );
     final slot = bySlot(plan);
     expect(slot['2026-06-06|ch'], 'p1');
-    expect(slot['2026-06-06|b'], 'p1'); // ช + บ = 2 duty items, allowed
-    expect(slot['2026-06-06|d'], 'p2'); // p1 would be 3 → skipped
-  });
-
-  test('without the prior night shift, the weekday evening shift is fine', () {
-    // Same Tue evening shift, but p1 has no Mon night: Tue normal + ย = 12h.
-    final yen = type(id: 'y', start: '16:30', end: '20:30');
-    final plan = planSchedule(
-      first: DateTime(2026, 6, 2),
-      last: DateTime(2026, 6, 2),
-      types: [yen],
-      queue: queueOf(2),
-      holidayKeys: const {},
-    );
-    expect(bySlot(plan)['2026-06-02|y'], 'p1');
-  });
-
-  test('weekday normal work counts toward the cap (configurable)', () {
-    // With the cap raised to 24h, the 21h night→next-day-evening chain that was
-    // blocked above is now allowed, so ย stays on p1.
-    final yen = type(id: 'y', start: '16:30', end: '20:30');
-    final plan = planSchedule(
-      first: DateTime(2026, 6, 2),
-      last: DateTime(2026, 6, 2),
-      types: [yen],
-      queue: queueOf(2),
-      holidayKeys: const {},
-      keptShifts: [planned('2026-06-01', 'd', 'p1', '23:30', '08:30')],
-      maxDailySpanHours: 24,
-    );
-    expect(bySlot(plan)['2026-06-02|y'], 'p1');
+    expect(slot['2026-06-06|b'], 'p1');
+    expect(slot['2026-06-06|d'], 'p1'); // 3 shifts on one person now allowed
   });
 
   test('custom roster order overrides the global queue', () {
@@ -349,6 +364,97 @@ void main() {
     expect(slot['2026-08-01|t'], 'p1');
     expect(slot['2026-08-22|t'], 'p1');
     expect(slot.containsKey('2026-08-29|t'), isFalse); // 5th Saturday skipped
+  });
+
+  test('part-timer (weeks 1-4) is primary; normal only fills the 5th Saturday',
+      () {
+    // ชส on Saturdays: part-timer pt is constrained to the 1st–4th Saturdays;
+    // a normal pharmacist p1 is in the roster unconstrained. The part-timer
+    // must take weeks 1–4 and the normal must NOT appear there — the normal
+    // only fills the 5th Saturday the part-timer is constrained out of.
+    // August 2026 Saturdays: 1, 8, 15, 22 (weeks 1–4) and 29 (the 5th).
+    final cs = type(
+      days: const [6],
+      roster: const [
+        RosterEntry(pharmacistId: 'pt', weekdays: [6], monthWeeks: [1, 2, 3, 4]),
+        RosterEntry(pharmacistId: 'p1'),
+      ],
+    );
+    final plan = planSchedule(
+      first: DateTime(2026, 8, 1),
+      last: DateTime(2026, 8, 31),
+      types: [cs],
+      queue: [
+        Pharmacist(id: 'p1', name: 'P1', queue: 1),
+        Pharmacist(id: 'pt', name: 'PT', queue: 2, partTime: true),
+      ],
+      holidayKeys: const {},
+    );
+    final slot = bySlot(plan);
+    for (final d in ['2026-08-01', '2026-08-08', '2026-08-15', '2026-08-22']) {
+      expect(slot['$d|t'], 'pt', reason: 'weeks 1–4 belong to the part-timer');
+    }
+    expect(slot['2026-08-29|t'], 'p1', reason: '5th Saturday falls to normal');
+  });
+
+  test('two part-timers rotate among themselves across weeks 1-4', () {
+    // Two part-timers both constrained to weeks 1–4 alternate; the normal still
+    // only gets the 5th Saturday.
+    final cs = type(
+      days: const [6],
+      roster: const [
+        RosterEntry(pharmacistId: 'pa', weekdays: [6], monthWeeks: [1, 2, 3, 4]),
+        RosterEntry(pharmacistId: 'pb', weekdays: [6], monthWeeks: [1, 2, 3, 4]),
+        RosterEntry(pharmacistId: 'p1'),
+      ],
+    );
+    final plan = planSchedule(
+      first: DateTime(2026, 8, 1),
+      last: DateTime(2026, 8, 31),
+      types: [cs],
+      queue: [
+        Pharmacist(id: 'p1', name: 'P1', queue: 1),
+        Pharmacist(id: 'pa', name: 'PA', queue: 2, partTime: true),
+        Pharmacist(id: 'pb', name: 'PB', queue: 3, partTime: true),
+      ],
+      holidayKeys: const {},
+    );
+    final slot = bySlot(plan);
+    expect(slot['2026-08-01|t'], 'pa');
+    expect(slot['2026-08-08|t'], 'pb');
+    expect(slot['2026-08-15|t'], 'pa');
+    expect(slot['2026-08-22|t'], 'pb');
+    expect(slot['2026-08-29|t'], 'p1'); // 5th Saturday → normal
+  });
+
+  test('a constrained 5th-Saturday entry wins over the open rotation', () {
+    // The reported case: a custom rotation of mostly unconstrained pharmacists
+    // plus one (p3) restricted to the 5th Saturday. The open rotation fills the
+    // 1st–4th Saturdays; on the 5th, the constrained p3 must take it instead of
+    // whichever unconstrained pharmacist's turn it is.
+    final sat = type(
+      days: const [6],
+      roster: const [
+        RosterEntry(pharmacistId: 'p1'),
+        RosterEntry(pharmacistId: 'p2'),
+        RosterEntry(pharmacistId: 'p3', weekdays: [6], monthWeeks: [5]),
+      ],
+    );
+    final plan = planSchedule(
+      first: DateTime(2026, 8, 1),
+      last: DateTime(2026, 8, 31),
+      types: [sat],
+      queue: queueOf(3),
+      holidayKeys: const {},
+    );
+    final slot = bySlot(plan);
+    // 1st–4th Saturdays: the open rotation (p1, p2) — p3 never appears there.
+    expect(slot['2026-08-01|t'], 'p1');
+    expect(slot['2026-08-08|t'], 'p2');
+    expect(slot['2026-08-15|t'], 'p1');
+    expect(slot['2026-08-22|t'], 'p2');
+    // 5th Saturday: the constrained p3 wins.
+    expect(slot['2026-08-29|t'], 'p3');
   });
 
   test('week-parity entry only runs on its alternating week', () {
@@ -438,8 +544,9 @@ void main() {
     expect(bySlot(plan)['2026-06-03|t'], 'p1');
   });
 
-  test('other types skip a pinned pharmacist to avoid double-booking', () {
-    // บ pins p1 on Tuesdays; ย rotates and must skip p1 (overlapping).
+  test('other types no longer skip a pinned pharmacist (no overlap check)', () {
+    // บ pins p1 on Tuesdays; ย rotates from its own counter (also p1). With no
+    // overlap check, ย stays on p1 even though it overlaps บ.
     final baai = type(
         id: 'b',
         start: '16:30',
@@ -456,7 +563,7 @@ void main() {
     );
     final slot = bySlot(plan);
     expect(slot['2026-06-02|b'], 'p1'); // pinned
-    expect(slot['2026-06-02|y'], 'p2'); // skipped p1
+    expect(slot['2026-06-02|y'], 'p1'); // no skip → also p1
   });
 
   test('a linked type follows its leader on weekends but rotates on weekdays',
@@ -492,6 +599,76 @@ void main() {
     expect(slot['2026-06-06|b'], 'p1');
     expect(slot['2026-06-07|ch'], 'p2');
     expect(slot['2026-06-07|b'], 'p2');
+  });
+
+  test('a Friday-holiday pin + link may stack ch + b + d on one person (24h)',
+      () {
+    // Oct 23 2026 is a Friday AND a holiday, so the onHoliday morning/evening/
+    // night types all run. ช rotates to p1, บ follows ช (→ p1), and ด is pinned
+    // to p1 on Fridays. With no per-day/hours cap, all three stay on p1 — the
+    // pin and link are honoured. (Only an *overlap* would make them fall
+    // through, and these three don't overlap.)
+    final ch = type(
+        id: 'ch',
+        days: const [6, 7],
+        onHoliday: true,
+        start: '08:30',
+        end: '16:30',
+        sortOrder: 0);
+    final baai = type(
+        id: 'b',
+        onHoliday: true,
+        followsTypeId: 'ch',
+        start: '16:30',
+        end: '23:30',
+        sortOrder: 1);
+    final night = type(
+        id: 'd',
+        onHoliday: true,
+        weekdayPins: {DateTime.friday: 'p1'},
+        start: '23:30',
+        end: '08:30',
+        sortOrder: 2);
+    final plan = planSchedule(
+      first: DateTime(2026, 10, 23), // Friday, marked holiday below
+      last: DateTime(2026, 10, 23),
+      types: [ch, baai, night],
+      queue: queueOf(3),
+      holidayKeys: {'2026-10-23'},
+    );
+    final slot = bySlot(plan);
+    expect(slot['2026-10-23|ch'], 'p1');
+    expect(slot['2026-10-23|b'], 'p1'); // follows ช → p1
+    expect(slot['2026-10-23|d'], 'p1'); // Friday pin honoured → p1 (24h)
+  });
+
+  test('a pin is honoured even when it overlaps another shift (no overlap check)',
+      () {
+    // บ rotates to p1; a Friday pin also puts p1 on ย, which overlaps บ. The
+    // planner no longer skips it — both stay on p1 (the roster UI flags it).
+    final baai = type(
+        id: 'b',
+        onHoliday: true,
+        start: '16:30',
+        end: '23:30',
+        sortOrder: 0);
+    final yen = type(
+        id: 'y',
+        onHoliday: true,
+        weekdayPins: {DateTime.friday: 'p1'},
+        start: '16:30',
+        end: '20:30',
+        sortOrder: 1);
+    final plan = planSchedule(
+      first: DateTime(2026, 10, 23), // Friday holiday
+      last: DateTime(2026, 10, 23),
+      types: [baai, yen],
+      queue: queueOf(3),
+      holidayKeys: {'2026-10-23'},
+    );
+    final slot = bySlot(plan);
+    expect(slot['2026-10-23|b'], 'p1');
+    expect(slot['2026-10-23|y'], 'p1'); // pin honoured despite overlap
   });
 
   test('kept slots are not overwritten and do not advance the counter', () {

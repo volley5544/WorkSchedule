@@ -165,6 +165,7 @@ class ShiftTypesScreen extends StatelessWidget {
                                     fontWeight: FontWeight.w600)),
                             subtitle: Text(_subtitleFor(type)),
                             isThreeLine: type.onHoliday ||
+                                type.singleRotation ||
                                 type.hasWeekdayPins ||
                                 type.hasCustomRoster ||
                                 type.isLinked,
@@ -213,13 +214,19 @@ class ShiftTypesScreen extends StatelessWidget {
   String _subtitleFor(ShiftType type) {
     final holidaysOnly = type.days.isEmpty && type.onHoliday;
     final flags = <String>[
-      if (type.onHoliday && !holidaysOnly) 'Runs on holidays',
+      if (type.singleRotation) 'Every day · one shared rotation',
+      if (type.onHoliday && !holidaysOnly && !type.singleRotation)
+        'Runs on holidays',
       if (type.hasWeekdayPins) 'Weekday pins (${type.weekdayPins.length})',
       if (type.isLinked) 'Linked rotation',
       if (type.hasCustomRoster)
         'Custom rotation (${type.roster.length})',
     ];
-    final daysPart = holidaysOnly ? 'Holidays only' : type.daysLabel;
+    final daysPart = type.singleRotation
+        ? 'Every day'
+        : holidaysOnly
+            ? 'Holidays only'
+            : type.daysLabel;
     final base = '${type.start}–${type.end} · $daysPart';
     return flags.isEmpty ? base : '$base\n${flags.join(' · ')}';
   }
@@ -309,6 +316,7 @@ class _ShiftTypeDialogState extends State<_ShiftTypeDialog> {
   late Color _color = widget.existing?.color ?? _palette.first;
   late final Set<int> _days = {...widget.existing?.days ?? ShiftType.everyDay};
   late bool _onHoliday = widget.existing?.onHoliday ?? false;
+  late bool _singleRotation = widget.existing?.singleRotation ?? false;
 
   /// Participants of the custom rotation. Empty = rotate through the global
   /// queue (the default). Pre-seeded from the existing type when editing.
@@ -437,7 +445,7 @@ class _ShiftTypeDialogState extends State<_ShiftTypeDialog> {
     if (!_formKey.currentState!.validate()) return;
     // No active days is allowed only for a holiday-only shift; otherwise the
     // type would never be scheduled.
-    if (_days.isEmpty && !_onHoliday) {
+    if (_days.isEmpty && !_onHoliday && !_singleRotation) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -459,6 +467,7 @@ class _ShiftTypeDialogState extends State<_ShiftTypeDialog> {
         color: _color,
         days: [..._days]..sort(),
         onHoliday: _onHoliday,
+        singleRotation: _singleRotation,
         roster: _customRotation ? List.of(_roster) : const [],
         weekdayPins: Map.of(_weekdayPins),
         followsTypeId: _followsTypeId ?? '',
@@ -557,6 +566,19 @@ class _ShiftTypeDialogState extends State<_ShiftTypeDialog> {
                 ),
                 value: _onHoliday,
                 onChanged: (v) => setState(() => _onHoliday = v),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('One shared rotation, every day'),
+                subtitle: Text(
+                  'Runs every day — weekday, weekend and holiday alike (active '
+                  'days and "Runs on holidays" are ignored) — and rotates as a '
+                  'single continuous cycle instead of separate '
+                  'weekday/weekend/holiday rotations. Use for ด (night duty).',
+                  style: theme.textTheme.bodySmall,
+                ),
+                value: _singleRotation,
+                onChanged: (v) => setState(() => _singleRotation = v),
               ),
               if (_otherTypes.isNotEmpty) ...[
                 const Divider(height: 24),

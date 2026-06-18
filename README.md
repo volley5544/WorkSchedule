@@ -54,6 +54,25 @@ is managed by admins via **avatar menu → Pharmacists**:
   shift type's **custom rotation**. Typical setup: mark the part-timers, create
   a shift type for them with a custom rotation listing those people, and drag
   that type to the top of the Shift types list so it's filled first.
+  - **Part-timers take priority within a custom rotation** (see the priority
+    tiers below): a part-timer with a Day/week rule is a *constrained* entry, so
+    they win their eligible days. Constrain the part-timer(s) to the **1st–4th**
+    occurrences (Day/week rules → weeks 1,2,3,4) and they cover weeks 1–4 (two or
+    more rotate among themselves) while the open rotation only fills a 5th
+    Saturday.
+- **Rotation priority tiers** — each day, for each shift type, the auto-scheduler
+  fills the slot from the first non-empty tier, in this order:
+  1. **Weekday pin** (a specific person fixed to that weekday).
+  2. **Constrained entries** — any custom-rotation pharmacist with a **Day/week
+     rule** (specific weekdays, weeks-of-month, or Week A/B). The admin asked for
+     that person on those exact days, so when one is eligible they **win over the
+     open rotation** — e.g. a pharmacist set to the **5th Saturday only** gets the
+     5th Saturday even though the unconstrained rotation would otherwise take it.
+     Multiple eligible constrained entries rotate among themselves.
+  3. **Unconstrained part-timers.**
+  4. **Unconstrained normals** — the open rotation that fills everything else.
+
+  Each tier keeps its own per-bucket counter and continues across months.
 - **Name titles are configurable**: the title dropdown's choices (default
   นาย / นางสาว / นาง / คุณ) are edited via the badge icon in the
   Pharmacists screen's app bar and stored in `config/nameTitles`.
@@ -83,21 +102,22 @@ app bar:
 - **Pin pharmacist by weekday** (optional, per type): fix a specific pharmacist
   for a shift on a given weekday — on normal days, weekends, and holidays alike
   (e.g. Tue/Wed/Thu → A, Fri/Sat → B), with the other weekdays falling through
-  to the rotation. A pinned pick doesn't consume a rotation turn, and other
-  shifts still avoid double-booking the pinned person.
-- **No double-booking, a 2-shift/day cap, and an 18h continuous-duty cap**: the
-  scheduler skips the next pharmacist if assigning the shift would —
-  - **(a)** overlap a shift they already have; or
-  - **(b)** give them more than **2 duty items in a day** — where the implicit
-    weekday normal work counts as one. So on a weekday only *one* scheduled shift
-    fits on top of normal work (normal + ย, or normal + ด — never normal + ย +
-    ด); on weekends/holidays two scheduled shifts (e.g. ช + บ) are fine, but not
-    a third; or
-  - **(c)** push a *continuous* on-duty stretch past **18 hours**. The timeline
-    counts the implicit **Mon–Fri 08:30–16:30 normal work** and chains shifts
-    that touch across midnight — e.g. a Mon night ด (23:30 → Tue 08:30) running
-    into Tue's normal work (→16:30) = 17h ✓, but a further shift on top would
-    exceed 18h. (A break resets the chain.)
+  to the rotation. A pinned pick doesn't consume a rotation turn.
+- **No scheduling guards — the roster flags problems instead**: the
+  auto-scheduler has **no** per-day shift cap, **no** continuous-hours cap, and
+  **no** overlap check; it simply fills every slot by rotation, matching how the
+  hospital actually rosters (back-to-back ช + บ + ด, a full 24h, is allowed).
+  Instead, the **Roster** and **Original** tables **highlight** any pharmacist's
+  day in red — with a tooltip explaining why — when that day has:
+  - **more than 2 duty blocks**, where the implicit Mon–Fri 08:30–16:30 work
+    counts as one (so a weekday fits only *one* scheduled shift on top of it; a
+    weekend/holiday fits two), or
+  - **more than 18h continuous** on duty (also counting the Mon–Fri 08:30–16:30
+    work and chaining a night shift into the next day), or
+  - **overlapping shift times**.
+
+  A human reviews the flagged cells and fixes them by editing/swapping shifts.
+  (Detection lives in the pure, unit-tested `services/shift_conflicts.dart`.)
 - **Linked shifts (same pharmacist)**: a shift type can be set to follow
   another — on days the leader runs, the linked type is given the *same*
   pharmacist instead of rotating. This is how weekends/holidays put one person
@@ -356,6 +376,59 @@ compact grid with colored dots plus a day-detail list, so it works well on
 phones.
 
 ## Changelog
+
+### 2026-06-17
+
+- **"One shared rotation, every day" shift-type option** — a new toggle in the
+  shift-type editor makes a type run **every day** (weekday, weekend, holiday
+  alike — its active-days list and "Runs on holidays" are ignored) and rotate
+  through a **single continuous counter** instead of separate
+  weekday/weekend/holiday rotations. Built for **ด (night duty)**: add one ด with
+  a custom rotation and it cycles 1→2→…→n→1 across the whole month, unbroken by
+  weekends or holidays. (`ShiftType.singleRotation`; `schedule_planner.dart` adds
+  a `DayBucket.all`; 2 new tests.)
+- **Constrained roster entries now win over the open rotation** — a custom-
+  rotation pharmacist with a **Day/week rule** (e.g. "5th Saturday only") was
+  only made *eligible* on those days, not *preferred*, so an unconstrained
+  pharmacist whose turn it was could grab the slot first (a pharmacist set to the
+  5th Saturday of Aug 2026 / the 29th didn't get it). The scheduler now resolves
+  each day through **priority tiers** — weekday pin → constrained entries →
+  unconstrained part-timers → unconstrained normals — so a constrained pharmacist
+  takes their eligible day. This also unifies the earlier part-time fix (a
+  part-timer limited to weeks 1–4 is just a constrained entry). (`schedule_planner.dart`;
+  new test.)
+- **Dropped the last scheduling guard (overlap) — the roster now flags problems
+  instead** — the auto-scheduler no longer skips a pharmacist for *any* reason
+  (no overlap check either); it fills every slot purely by rotation. To keep
+  conflicts visible, the **Roster** and **Original** tables now **highlight a
+  pharmacist's day in red** (with a tooltip) when it has **more than 2 shifts**,
+  **more than 18h continuous** on duty, or **overlapping shift times**. The
+  detection is a new pure module, `services/shift_conflicts.dart` (11 tests).
+  The ">2 duties" check counts the implicit **Mon–Fri 08:30–16:30 normal work**
+  as one block, so a weekday with two scheduled shifts on top of it is flagged
+  (e.g. Fri 31 Jul 2026: normal work + ณ + ด).
+- **Removed the per-day shift cap and the 18h continuous-duty cap** — the
+  hospital genuinely allows back-to-back duty, so the auto-scheduler no longer
+  limits how many shifts a pharmacist takes in a day or how many continuous
+  hours they're on duty. A person can now be rostered ช + บ + ด on the same day
+  (a full 24h). The only per-pharmacist guard left is **overlap** — they still
+  won't be booked into two shifts at the *same clock time* (e.g. ย 16:30–20:30
+  and บ 16:30–23:30). This also applies to weekday pins and linked types: each
+  is honoured unless it would overlap, in which case it falls through to the
+  rotation. (`schedule_planner.dart`; the implicit-normal-work / span machinery
+  was deleted.) **Re-run auto-schedule with "Regenerate existing months" on for
+  any month you want re-balanced under the new rules.**
+- **Part-timers are now the priority pool in a custom rotation** — when a shift
+  type's custom rotation mixes part-time and normal pharmacists, the
+  auto-scheduler fills each day from the **part-timers first** and only falls
+  through to a normal pharmacist on days no part-timer is eligible. So with the
+  part-timer(s) constrained to the **1st–4th** occurrences of a weekday (Day /
+  week rules → month weeks 1,2,3,4), they cover weeks 1–4 (multiple part-timers
+  rotate among themselves) and a **normal pharmacist only picks up a 5th
+  occurrence** (e.g. a 5th Saturday). Each pool keeps its own rotation counter,
+  continuing across months. Fixes the previous behavior where part-time and
+  normal interleaved as one round-robin, so a normal pharmacist wrongly grabbed
+  weeks 2 and 4. (`schedule_planner.dart`; 2 new planner tests, 19 total.)
 
 ### 2026-06-16
 
