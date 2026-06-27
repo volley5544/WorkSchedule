@@ -170,6 +170,34 @@ class ScheduleService {
         });
   }
 
+  /// One-shot fetch of all shifts across [months] months starting at
+  /// [startMonth], grouped by `dateKey` and sorted by start time. Reads the
+  /// live `shifts` collection, or the read-only `originalShifts` baseline when
+  /// [original] is true. Used by the HR export, which needs a whole range at
+  /// once (the home screen only streams the visible month).
+  Future<Map<String, List<Shift>>> fetchShiftsRange({
+    required DateTime startMonth,
+    required int months,
+    bool original = false,
+  }) async {
+    final first = DateTime(startMonth.year, startMonth.month, 1);
+    final last = DateTime(startMonth.year, startMonth.month + months, 0);
+    final col = original ? _originalShifts : _shifts;
+    final snap = await col
+        .where('dateKey', isGreaterThanOrEqualTo: Shift.keyFor(first))
+        .where('dateKey', isLessThanOrEqualTo: Shift.keyFor(last))
+        .get();
+    final byDay = <String, List<Shift>>{};
+    for (final doc in snap.docs) {
+      final shift = Shift.fromDoc(doc);
+      byDay.putIfAbsent(shift.dateKey, () => []).add(shift);
+    }
+    for (final list in byDay.values) {
+      list.sort(Shift.byStartTime);
+    }
+    return byDay;
+  }
+
   Future<void> saveShift(Shift shift) {
     if (shift.id.isEmpty) return _shifts.add(shift.toMap());
     return _shifts.doc(shift.id).set(shift.toMap(), SetOptions(merge: true));

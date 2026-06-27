@@ -183,6 +183,38 @@ only **admins** see the add / edit / remove / seed actions:
 Holidays are publicly readable (they appear on the guest calendar); only admins
 can change them.
 
+## HR report export
+
+Editors and admins get a **download icon (⬇) in the app bar** that opens an
+**export dialog** and produces a real Excel **`.xlsx`** file — built for HR to
+archive the roster and work out duty pay. The dialog asks for:
+
+- **Start month** + **how many months** (1–12) — export a single month or a
+  whole range in one file. The start defaults to the month on screen.
+- **Data source** — **Live roster** (the working schedule, including shift
+  swaps) or **Original** (the read-only auto-generated baseline, before any
+  swaps). The chosen range is fetched fresh from the matching collection.
+
+For **each month** in the range the workbook gets a Roster + Summary sheet pair
+(named with the month when the range spans more than one). Each pair has:
+
+- **Roster** — the pharmacist × day matrix, one row per pharmacist (in the table
+  display order) and one column per day. Cells hold the shift-type codes
+  (ช/ย/บ/ด), tinted in each type's colour; a day with two shifts shows them as
+  `code/code`. Weekend and holiday columns are shaded.
+- **Summary** — one row per pharmacist with a **count of each shift type**, a
+  **Total shifts** column, and **Total hours**, plus a **Total** row across
+  everyone. Hours handle the overnight ด (23:30→08:30 counts as 9h, not a
+  negative span).
+
+The file downloads as `roster_yyyy-MM.xlsx` for a single month, or
+`roster_yyyy-MM_to_yyyy-MM.xlsx` for a range; an Original export adds an
+`_original` suffix. It opens directly in Excel and imports cleanly into Google
+Sheets. Generation is a pure function (`ReportExport.buildWorkbook`,
+unit-tested) using the `excel` package; the range fetch is
+`ScheduleService.fetchShiftsRange` and the cross-platform download/save uses
+`file_saver`.
+
 ## Shift type configuration
 
 Shift types (code, description, working hours, color) are **not hardcoded** — they live in
@@ -376,6 +408,28 @@ compact grid with colored dots plus a day-detail list, so it works well on
 phones.
 
 ## Changelog
+
+### 2026-06-28 (later)
+
+- **Export dialog: month range + data source** — the HR export now opens a
+  dialog instead of exporting only the visible month. Pick a **start month** and
+  **1–12 months** (each month gets its own Roster + Summary sheet pair), and
+  choose the **data source**: the **Live roster** (with swaps) or the read-only
+  **Original** baseline. Range data is fetched fresh from the right collection
+  (`ScheduleService.fetchShiftsRange`); the file name carries the range and an
+  `_original` suffix when applicable. (`widgets/export_report_dialog.dart`;
+  `buildWorkbook` now takes a month list; 1 new test.)
+
+### 2026-06-28
+
+- **HR monthly Excel export** — editors/admins get a download icon in the app
+  bar that exports the visible month to an `.xlsx` workbook with a **Roster**
+  matrix sheet (codes tinted per shift type, weekend/holiday shading) and a
+  **Summary** sheet (per-pharmacist shift-type counts, total shifts, total
+  hours, and a grand-total row). Overnight ด is counted as 9h. Opens in Excel
+  and imports into Google Sheets. (`services/report_export.dart` via the `excel`
+  + `file_saver` packages; 4 new tests in `report_export_test.dart`. See
+  [HR report export](#hr-report-export).)
 
 ### 2026-06-17
 

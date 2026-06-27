@@ -171,6 +171,28 @@ class AppText {
   String autoScheduleFailed(Object e) =>
       _p('จัดเวรอัตโนมัติไม่สำเร็จ: $e', 'Auto schedule failed: $e');
 
+  // HR report export
+  String get exportReport => _p('ส่งออกรายงาน (Excel)', 'Export report (Excel)');
+  String get exportingReport => _p('กำลังส่งออกรายงาน…', 'Exporting report…');
+  String reportExported(String fileName) =>
+      _p('ส่งออกแล้ว: $fileName', 'Exported $fileName');
+  String reportExportFailed(Object e) =>
+      _p('ส่งออกรายงานไม่สำเร็จ: $e', 'Export failed: $e');
+  String get monthsToExport =>
+      _p('จำนวนเดือนที่ส่งออก', 'Months to export');
+  String get exportSource => _p('แหล่งข้อมูล', 'Data source');
+  String get exportSourceLive => _p('ตารางเวรปัจจุบัน', 'Live roster');
+  String get exportSourceOriginal => _p('ต้นฉบับ', 'Original');
+  String get exportSourceLiveHelp => _p(
+        'ตารางเวรที่ใช้งานจริง รวมการแลกเวร',
+        'The working roster, including shift swaps.',
+      );
+  String get exportSourceOriginalHelp => _p(
+        'ต้นฉบับที่สร้างอัตโนมัติ ก่อนการแลกเวร',
+        'The auto-generated baseline, before any swaps.',
+      );
+  String get exportAction => _p('ส่งออก', 'Export');
+
   // Auto-schedule dialog
   String get startMonth => _p('เดือนเริ่มต้น', 'Start month');
   String get monthsToFill => _p('จำนวนเดือนที่จะจัด', 'Months to fill');

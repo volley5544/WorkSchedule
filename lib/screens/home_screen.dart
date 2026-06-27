@@ -8,9 +8,11 @@ import '../models/pharmacist.dart';
 import '../models/shift.dart';
 import '../models/shift_type.dart';
 import '../services/auth_service.dart';
+import '../services/report_export.dart';
 import '../services/schedule_service.dart';
 import '../widgets/auto_schedule_dialog.dart';
 import '../widgets/day_shifts_panel.dart';
+import '../widgets/export_report_dialog.dart';
 import '../widgets/month_calendar.dart';
 import '../widgets/roster_table.dart';
 import '../widgets/settings_dialog.dart';
@@ -211,6 +213,55 @@ class _HomeScreenState extends State<HomeScreen> {
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(content: Text(t.autoScheduleFailed(e))),
+      );
+    }
+  }
+
+  /// Exports a chosen month range as an Excel report (per-month Roster matrix +
+  /// summary) and triggers a download. The user picks the range and the data
+  /// source (live roster vs the read-only Original baseline). Editors/admins.
+  Future<void> _exportReport() async {
+    final t = AppText.of(context);
+    final isAdmin = widget.user.role.isAdmin;
+    if (_types.isEmpty || _pharmacists.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content:
+              Text(isAdmin ? t.configureFirstAdmin : t.configureFirstUser),
+        ),
+      );
+      return;
+    }
+    final request =
+        await showExportReportDialog(context, initialMonth: _month);
+    if (request == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(SnackBar(content: Text(t.exportingReport)));
+    try {
+      // The home screen only streams the visible month, so fetch the whole
+      // requested range (from the chosen collection) just for the export.
+      final shiftsByDay = await _service.fetchShiftsRange(
+        startMonth: request.startMonth,
+        months: request.months,
+        original: request.useOriginal,
+      );
+      final fileName = await ReportExport.download(
+        startMonth: request.startMonth,
+        months: request.months,
+        pharmacists: _pharmacists,
+        types: _types,
+        shiftsByDay: shiftsByDay,
+        holidaysByDate: _holidaysByDate,
+        useOriginal: request.useOriginal,
+      );
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(content: Text(t.reportExported(fileName))),
+      );
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(content: Text(t.reportExportFailed(e))),
       );
     }
   }
@@ -695,12 +746,18 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(width: 12),
         ] else ...[
-          if (_canEdit)
+          if (_canEdit) ...[
+            IconButton(
+              tooltip: t.exportReport,
+              icon: const Icon(Icons.file_download_outlined),
+              onPressed: _exportReport,
+            ),
             IconButton(
               tooltip: t.autoSchedule,
               icon: const Icon(Icons.auto_awesome),
               onPressed: _runAutoSchedule,
             ),
+          ],
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: Center(
