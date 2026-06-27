@@ -60,13 +60,20 @@ fallback entries in the editor dropdowns) — never crash, never block editing.
 - `services/auth_service.dart` — Google sign-in (popup on web), creates
   `users` doc on first sign-in.
 - `services/schedule_service.dart` — all Firestore CRUD + `autoSchedule()`
-  (see below) + `seedDefaultShiftTypes()` + `nameTitles()` stream.
+  (see below) + `seedDefaultShiftTypes()` + `nameTitles()` stream +
+  `fetchShiftsRange()` (one-shot range fetch from `shifts` or `originalShifts`,
+  used by the HR export).
+- `services/report_export.dart` — builds the HR roster report as a real `.xlsx`
+  (pure `buildWorkbook()` over a month list → one Roster + Summary sheet pair
+  per month; `download()` does the save). Uses the `excel` + `file_saver`
+  packages. Summary hours handle overnight ด (23:30→08:30 = 9h). Unit-tested in
+  `test/report_export_test.dart`.
 - `screens/home_screen.dart` — three views via SegmentedButton:
   **My shifts** (filter by pharmacists linked to current uid; calendar in
   `codeOnly` mode = big shift-code chips, no names), **By day** (calendar +
-  day panel), **Roster** (matrix). App bar: ✨ auto-schedule (editors+),
-  role chip, avatar menu (admin entries: Manage users / Shift types /
-  Pharmacists). Guests: only By day + Roster, Sign in button instead.
+  day panel), **Roster** (matrix). App bar: ⬇ HR export + ✨ auto-schedule
+  (both editors+), role chip, avatar menu (admin entries: Manage users / Shift
+  types / Pharmacists). Guests: only By day + Roster, Sign in button instead.
 - `screens/shift_types_screen.dart` — admin CRUD; dialog has label,
   description, time pickers, active-day FilterChips, 12-color palette;
   empty state seeds ช/ย/บ/ด defaults.
@@ -88,6 +95,9 @@ fallback entries in the editor dropdowns) — never crash, never block editing.
 - `widgets/auto_schedule_dialog.dart` — start month arrows, months 1–6,
   "Regenerate existing months" switch; returns a record
   `({DateTime startMonth, int months, bool replaceExisting})`.
+- `widgets/export_report_dialog.dart` — HR export picker: start month arrows,
+  months 1–12, Live-roster vs Original source toggle; returns a record
+  `({DateTime startMonth, int months, bool useOriginal})`.
 
 ## Auto-scheduler semantics (ScheduleService.autoSchedule)
 
@@ -107,8 +117,11 @@ fallback entries in the editor dropdowns) — never crash, never block editing.
 
 - `flutter analyze --no-pub` and `flutter test` after every change — keep
   both green (this has been the working rhythm).
-- Tests: `test/month_calendar_test.dart` only (widget tests + keyFor).
-  `autoSchedule` has no tests (would need fake_cloud_firestore).
+- Tests: `test/month_calendar_test.dart` (widget tests + keyFor),
+  `schedule_planner_test.dart` (pure planner rules), `shift_conflicts_test.dart`
+  (conflict flagging), `report_export_test.dart` (export hours math + workbook
+  bytes). `autoSchedule` itself has no tests (the I/O wrapper would need
+  fake_cloud_firestore; the pure planner it calls is covered).
 
 ## Known quirks / history
 
